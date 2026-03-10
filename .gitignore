@@ -1,0 +1,19 @@
+# Rendered manifests (contain image SHAs — never commit)
+**/_rendered/
+
+# Terraform state (lives in MinIO — never local)
+**/*.tfstate
+**/*.tfstate.backup
+**/.terraform/
+**/*.tfvars
+
+# Secrets and env files
+.env
+*.env
+*secret*
+*credentials*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
