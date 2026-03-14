@@ -1,0 +1,79 @@
+apiVersion: cluster.redpanda.com/v1alpha2
+kind: Topic
+metadata:
+  name: transactions-raw
+  namespace: bigdata
+spec:
+  kafkaApiSpec:
+    brokers:
+      - fraud-redpanda-0.fraud-redpanda.bigdata.svc.cluster.local:9092
+    tls:
+      enabled: true
+      caCertSecretRef:
+        name: fraud-redpanda-default-root-certificate
+        key: ca.crt      
+  partitions: 6
+  replicationFactor: 1
+  additionalConfig:
+    retention.ms: "604800000"
+    cleanup.policy: "delete"
+---
+apiVersion: cluster.redpanda.com/v1alpha2
+kind: Topic
+metadata:
+  name: transactions-dlq
+  namespace: bigdata
+spec:
+  kafkaApiSpec:
+    brokers:
+      - fraud-redpanda-0.fraud-redpanda.bigdata.svc.cluster.local:9092
+    tls:
+      enabled: true
+      caCertSecretRef:
+        name: fraud-redpanda-default-root-certificate
+        key: ca.crt       
+  partitions: 3
+  replicationFactor: 1
+  additionalConfig:
+    retention.ms: "1209600000"
+    cleanup.policy: "delete"
+---
+apiVersion: cluster.redpanda.com/v1alpha2
+kind: Topic
+metadata:
+  name: transactions-clean
+  namespace: bigdata
+spec:
+  kafkaApiSpec:
+    brokers:
+      - fraud-redpanda-0.fraud-redpanda.bigdata.svc.cluster.local:9092
+    tls:
+      enabled: true
+      caCertSecretRef:
+        name: fraud-redpanda-default-root-certificate
+        key: ca.crt         
+  partitions: 6
+  replicationFactor: 1
+  additionalConfig:
+    retention.ms: "604800000"
+    cleanup.policy: "delete"
+---
+apiVersion: cluster.redpanda.com/v1alpha2
+kind: Topic
+metadata:
+  name: fraud-alerts
+  namespace: bigdata
+spec:
+  kafkaApiSpec:
+    brokers:
+      - fraud-redpanda-0.fraud-redpanda.bigdata.svc.cluster.local:9092
+    tls:
+      enabled: true
+      caCertSecretRef:
+        name: fraud-redpanda-default-root-certificate
+        key: ca.crt         
+  partitions: 3
+  replicationFactor: 1
+  additionalConfig:
+    retention.ms: "604800000"
+    cleanup.policy: "delete"
