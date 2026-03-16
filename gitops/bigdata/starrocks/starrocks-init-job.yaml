@@ -1,0 +1,60 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: starrocks-init
+  namespace: bigdata
+spec:
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: init
+          image: starrocks/fe-ubuntu:3.2.11
+          env:
+            - name: SR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: starrocks-credentials
+                  key: root-password
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+
+              echo "⏳ Waiting for StarRocks FE..."
+              until mysql -h starrocks-fe-svc -P 9030 -u root --password="" \
+                --connect-timeout=5 -e "SELECT 1" >/dev/null 2>&1 || \
+                mysql -h starrocks-fe-svc -P 9030 -u root \
+                --password="${SR_PASSWORD}" \
+                --connect-timeout=5 -e "SELECT 1" >/dev/null 2>&1; do
+                echo "FE not ready, retrying in 5s..."
+                sleep 5
+              done
+              echo "✅ FE is up"
+
+              # Set root password — idempotent:
+              # tries empty password first (fresh install), falls back to real password (re-run)
+              mysql -h starrocks-fe-svc -P 9030 -u root --password="" \
+                -e "ALTER USER root IDENTIFIED BY '${SR_PASSWORD}';" \
+                2>/dev/null || \
+              mysql -h starrocks-fe-svc -P 9030 -u root \
+                --password="${SR_PASSWORD}" \
+                -e "SELECT 'password already set';" >/dev/null
+              echo "✅ Root password secured"
+
+              # Register BE — idempotent (ADD BACKEND is safe to re-run)
+              BE_IP=$(getent hosts starrocks-be-0.starrocks-be.bigdata.svc.cluster.local \
+                | awk '{print $1}')
+
+              mysql -h starrocks-fe-svc -P 9030 -u root \
+                --password="${SR_PASSWORD}" \
+                -e "ALTER SYSTEM ADD BACKEND '${BE_IP}:9050';" \
+                2>/dev/null || echo "BE already registered"
+
+              echo "✅ BE registered: ${BE_IP}"
+
+              # Verify
+              mysql -h starrocks-fe-svc -P 9030 -u root \
+                --password="${SR_PASSWORD}" \
+                -e "SHOW BACKENDS\G" | grep -E "Host|Alive"

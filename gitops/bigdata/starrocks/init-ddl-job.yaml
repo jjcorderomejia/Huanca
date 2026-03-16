@@ -1,0 +1,93 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: starrocks-init-ddl
+  namespace: bigdata
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: ddl
+          image: starrocks/fe-ubuntu:3.2.11
+          command: ["/bin/bash", "-c"]
+          env:
+            - name: SR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: starrocks-credentials
+                  key: root-password
+          args:
+            - |
+              set -euo pipefail
+
+              until mysql -h starrocks-fe-svc -P 9030 -u root --password="" \
+                --connect-timeout=5 -e "SELECT 1" >/dev/null 2>&1 || \
+                mysql -h starrocks-fe-svc -P 9030 -u root \
+                --password="${SR_PASSWORD}" \
+                --connect-timeout=5 -e "SELECT 1" >/dev/null 2>&1; do
+                echo "FE not ready, retrying in 5s..."
+                sleep 5
+              done
+              echo "✅ FE is up"              
+
+              mysql -h starrocks-fe-svc -P 9030 -u root --password="${SR_PASSWORD}" \
+                --connect-timeout=30 <<SQL
+
+              CREATE DATABASE IF NOT EXISTS fraud;
+
+              USE fraud;
+
+              -- ── Real-time transactions (Primary Key = upsert safe) ──
+              CREATE TABLE IF NOT EXISTS transactions (
+                transaction_id  VARCHAR(64)    NOT NULL,
+                user_id         VARCHAR(64)    NOT NULL,
+                amount          DECIMAL(18,2)  NOT NULL,
+                merchant_id     VARCHAR(64)    NOT NULL,
+                merchant_lat    DOUBLE,
+                merchant_lon    DOUBLE,
+                status          VARCHAR(20),
+                event_time      DATETIME       NOT NULL,
+                ingest_time     DATETIME       NOT NULL,
+                plan            VARCHAR(20),
+                velocity_5min   INT,
+                amount_zscore   DOUBLE,
+                geo_distance_km DOUBLE,
+                fraud_score     INT,
+                is_flagged      BOOLEAN
+              )
+              PRIMARY KEY (transaction_id)
+              DISTRIBUTED BY HASH(transaction_id) BUCKETS 12
+              PROPERTIES ("replication_num" = "1");
+
+              -- ── Fraud scores (queryable by dashboard) ──
+              CREATE TABLE IF NOT EXISTS fraud_scores (
+                transaction_id  VARCHAR(64)  NOT NULL,
+                user_id         VARCHAR(64)  NOT NULL,
+                fraud_score     INT          NOT NULL,
+                reasons         VARCHAR(500),
+                flagged_at      DATETIME     NOT NULL,
+                reviewed        BOOLEAN
+              )
+              PRIMARY KEY (transaction_id)
+              DISTRIBUTED BY HASH(transaction_id) BUCKETS 6
+              PROPERTIES ("replication_num" = "1");
+
+              -- ── Risk profiles (per user, refreshed by Airflow) ──
+              CREATE TABLE IF NOT EXISTS risk_profiles (
+                user_id          VARCHAR(64)   NOT NULL,
+                avg_amount_30d   DECIMAL(18,2),
+                stddev_amount    DECIMAL(18,2),
+                avg_velocity_1h  DOUBLE,
+                last_merchant_lat  DOUBLE,
+                last_merchant_lon  DOUBLE,
+                updated_at       DATETIME
+              )
+              PRIMARY KEY (user_id)
+              DISTRIBUTED BY HASH(user_id) BUCKETS 6
+              PROPERTIES ("replication_num" = "1");
+
+              SQL
+
+              echo "✅ StarRocks DDL complete"

@@ -1,0 +1,159 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: starrocks-fe
+  namespace: bigdata
+spec:
+  clusterIP: None
+  selector:
+    app: starrocks-fe
+  ports:
+    - name: http
+      port: 8030
+      targetPort: 8030
+    - name: query
+      port: 9030
+      targetPort: 9030
+    - name: rpc
+      port: 9020
+      targetPort: 9020
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: starrocks-fe-svc
+  namespace: bigdata
+spec:
+  selector:
+    app: starrocks-fe
+  ports:
+    - name: http
+      port: 8030
+      targetPort: 8030
+    - name: query
+      port: 9030
+      targetPort: 9030
+    - name: rpc
+      port: 9020
+      targetPort: 9020      
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: starrocks-be
+  namespace: bigdata
+spec:
+  selector:
+    app: starrocks-be
+  clusterIP: None
+  ports:
+    - name: heartbeat
+      port: 9050
+      targetPort: 9050
+    - name: be-port
+      port: 9060
+      targetPort: 9060
+    - name: webserver
+      port: 8040
+      targetPort: 8040
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: starrocks-fe
+  namespace: bigdata
+spec:
+  serviceName: starrocks-fe
+  replicas: 1
+  selector:
+    matchLabels:
+      app: starrocks-fe
+  template:
+    metadata:
+      labels:
+        app: starrocks-fe
+    spec:
+      containers:
+        - name: fe
+          image: starrocks/fe-ubuntu:3.2.11
+          command: ["/opt/starrocks/fe_entrypoint.sh"]
+          args: ["starrocks-fe-svc"]
+          ports:
+            - containerPort: 8030
+            - containerPort: 9030
+            - containerPort: 9020
+          env:
+            - name: HOST_TYPE
+              value: "FQDN"
+          volumeMounts:
+            - name: fe-data
+              mountPath: /opt/starrocks/fe/meta
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+  volumeClaimTemplates:
+    - metadata:
+        name: fe-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: starrocks-be
+  namespace: bigdata
+spec:
+  serviceName: starrocks-be
+  replicas: 1
+  selector:
+    matchLabels:
+      app: starrocks-be
+  template:
+    metadata:
+      labels:
+        app: starrocks-be
+    spec:
+      initContainers:
+        - name: wait-fe
+          image: busybox:1.36
+          command: ['sh', '-c',
+            'until nc -z starrocks-fe-svc 9030; do echo waiting for FE; sleep 3; done']
+      containers:
+        - name: be
+          image: starrocks/be-ubuntu:3.2.11
+          command: ["/opt/starrocks/be_entrypoint.sh"]
+          args: ["starrocks-fe-svc"]
+          ports:
+            - containerPort: 9050
+            - containerPort: 9060
+            - containerPort: 8040
+          env:
+            - name: FE_SERVICE_NAME
+              value: "starrocks-fe-svc"
+          volumeMounts:
+            - name: be-data
+              mountPath: /opt/starrocks/be/storage
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+  volumeClaimTemplates:
+    - metadata:
+        name: be-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 30Gi
