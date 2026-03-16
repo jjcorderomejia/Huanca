@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-bootstrap
+  namespace: bigdata
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: quay.io/minio/mc:RELEASE.2024-06-12T14-34-03Z
+          env:
+            - name: MINIO_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: MINIO_ROOT_USER
+            - name: MINIO_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: MINIO_ROOT_PASSWORD
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              mc alias set local http://minio:9000 "${MINIO_USER}" "${MINIO_PASS}"
+              mc mb local/iceberg --ignore-existing
+              mc mb local/checkpoints --ignore-existing
+              mc ls local

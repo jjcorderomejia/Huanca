@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: iceberg-catalog-config
+  namespace: bigdata
+data:
+  # Spark will mount this and load it as --conf values
+  spark-iceberg.conf: |
+    spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+    spark.sql.catalog.iceberg=org.apache.iceberg.spark.SparkCatalog
+    spark.sql.catalog.iceberg.type=jdbc
+    spark.sql.catalog.iceberg.uri=jdbc:postgresql://airflow-postgresql.bigdata.svc.cluster.local:5432/iceberg_catalog
+    spark.sql.catalog.iceberg.jdbc.user=postgres
+    spark.sql.catalog.iceberg.warehouse=s3a://iceberg/warehouse
+    spark.hadoop.fs.s3a.endpoint=http://minio.bigdata.svc.cluster.local:9000
+    spark.hadoop.fs.s3a.path.style.access=true
+    spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem
+    spark.hadoop.fs.s3a.aws.credentials.provider=org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider
+    # Credentials NOT stored here — injected at runtime via:
+    # spark.hadoop.fs.s3a.access.key = MINIO_ACCESS_KEY env var (from minio-secret Secret)
+    # spark.hadoop.fs.s3a.secret.key = MINIO_SECRET_KEY env var (from minio-secret Secret)
+    # spark.sql.catalog.iceberg.jdbc.password = ICEBERG_DB_PASSWORD env var
+    # Set in SparkSession builder in fraud_stream_to_starrocks.py
