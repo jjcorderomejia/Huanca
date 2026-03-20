@@ -2,11 +2,11 @@ FROM ghcr.io/jjcorderomejia/spark:3.5.6-20260207032726
 
 USER root
 
-# Install Python dependencies
-RUN pip3 install --no-cache-dir \
-    starrocks==1.0.0 \
-    pyarrow==14.0.1 \
-    geopy==2.4.1
+# Install pip and Python dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3-pip && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip3 install --no-cache-dir pyarrow==14.0.1
 
 # Copy Spark jobs
 COPY fraud_stream_to_starrocks.py /opt/spark/jobs/fraud_stream_to_starrocks.py
