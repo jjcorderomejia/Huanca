@@ -14,7 +14,7 @@ COPY customer_csv_to_iceberg.py   /opt/spark/jobs/customer_csv_to_iceberg.py
 COPY compact_iceberg.py           /opt/spark/jobs/compact_iceberg.py
 
 # StarRocks Spark connector JAR
-ADD https://repo1.maven.org/maven2/com/starrocks/starrocks-spark-connector-3.x_2.12/1.1.2/starrocks-spark-connector-3.x_2.12-1.1.2.jar \
+ADD https://github.com/StarRocks/starrocks-connector-for-apache-spark/releases/download/v1.1.3/starrocks-spark-connector-3.5_2.12-1.1.3.jar \
     /opt/spark/jars/starrocks-spark-connector.jar
 
 # Iceberg + S3A JARs
