@@ -17,3 +17,6 @@
 __pycache__/
 *.pyc
 *.pyo
+k8s-bigdata/spark-fraud-job/compact_iceberg.py
+k8s-bigdata/spark-fraud-job/customer_csv_to_iceberg.py
+k8s-bigdata/spark-fraud-job/fraud_stream_to_starrocks.py
