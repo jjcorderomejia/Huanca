@@ -1,0 +1,65 @@
+executor: KubernetesExecutor
+
+webserverSecretKeySecretName: airflow-webserver-secret
+
+env:
+  - name: AIRFLOW__CORE__LOAD_EXAMPLES
+    value: "false"
+  - name: AIRFLOW__WEBSERVER__EXPOSE_CONFIG
+    value: "false"
+
+extraEnv: |
+  - name: MINIO_ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: minio-secret
+        key: MINIO_ROOT_USER
+  - name: MINIO_SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: minio-secret
+        key: MINIO_ROOT_PASSWORD
+  - name: STARROCKS_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: starrocks-credentials
+        key: root-password
+
+serviceAccount:
+  name: airflow
+  create: false
+
+createUserJob:
+  enabled: false
+
+scheduler:
+  serviceAccount:
+    name: airflow
+
+webserver:
+  serviceAccount:
+    name: airflow
+  defaultUser:
+    enabled: false
+
+triggerer:
+  serviceAccount:
+    name: airflow
+
+dags:
+  persistence:
+    enabled: true
+    storageClassName: local-path
+    size: 5Gi
+
+logs:
+  persistence:
+    enabled: true
+    existingClaim: airflow-logs
+
+postgresql:
+  enabled: true
+  primary:
+    persistence:
+      storageClass: local-path
+      size: 10Gi
