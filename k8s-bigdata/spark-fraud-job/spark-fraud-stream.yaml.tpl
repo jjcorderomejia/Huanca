@@ -31,6 +31,12 @@ spec:
     coreLimit: "1200m"
     memory: "2g"
     serviceAccount: spark
+    # runAsNonRoot enforces non-root at K8s admission without pinning the UID.
+    # fsGroup: 185 matches the spark USER in the Dockerfile (UID 185 from base image).
+    # If the base image UID ever changes, update fsGroup here AND in the executor section below.
+    podSecurityContext:
+      runAsNonRoot: true
+      fsGroup: 185
     env:
       - name: REDPANDA_BOOTSTRAP
         value: "fraud-redpanda-0.fraud-redpanda.bigdata.svc.cluster.local:9092"
@@ -70,25 +76,28 @@ spec:
           secretKeyRef:
             name: airflow-postgresql
             key: postgres-password
-      - name: CUSTOMER_CSV_PATH
-        value: "/opt/enrichment/customer.csv"
+      - name: CUSTOMER_ICEBERG_TABLE
+        value: "iceberg.fraud.customers"
+      - name: CUSTOMER_CACHE_TTL_SEC
+        value: "3600"
       - name: STARTING_OFFSETS
-        value: "latest"
+        value: "earliest"
+      - name: MAX_OFFSETS_PER_TRIGGER
+        value: "50000"
       - name: CHECKPOINT_LOCATION
         value: "s3a://checkpoints/fraud-stream"
-    volumeMounts:
-      - name: enrichment
-        mountPath: /opt/enrichment
 
   executor:
     instances: 2
     cores: 2
     memory: "3g"
+    # fsGroup must match driver — both use UID 185 from the same base image.
+    podSecurityContext:
+      runAsNonRoot: true
+      fsGroup: 185
     env:
       - name: REDPANDA_BOOTSTRAP
         value: "fraud-redpanda-0.fraud-redpanda.bigdata.svc.cluster.local:9092"
-      - name: CUSTOMER_CSV_PATH
-        value: "/opt/enrichment/customer.csv"
       - name: MINIO_ACCESS_KEY
         valueFrom:
           secretKeyRef:
@@ -109,14 +118,6 @@ spec:
           secretKeyRef:
             name: airflow-postgresql
             key: postgres-password
-    volumeMounts:
-      - name: enrichment
-        mountPath: /opt/enrichment
-
-  volumes:
-    - name: enrichment
-      configMap:
-        name: customer-csv
 
   restartPolicy:
     type: OnFailure

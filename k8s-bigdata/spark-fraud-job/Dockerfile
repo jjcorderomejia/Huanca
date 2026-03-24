@@ -31,4 +31,12 @@ ADD https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aw
 ADD https://jdbc.postgresql.org/download/postgresql-42.7.3.jar \
     /opt/spark/jars/postgresql.jar
 
+# Switch back to the Spark service user (UID 185) defined in the base image.
+# UID 185 is the 'spark' user baked into ghcr.io/jjcorderomejia/spark:3.5.6-*.
+# IMPORTANT: The SparkApplication manifest (spark-fraud-stream.yaml.tpl) sets:
+#   podSecurityContext.runAsNonRoot: true  — K8s enforces non-root at admission
+#   podSecurityContext.fsGroup: 185        — grants write access to the working dir
+#                                            so the entrypoint can create java_opts.txt
+# If the base image ever changes this UID, update fsGroup in spark-fraud-stream.yaml.tpl
+# to match. The two values must stay in sync.
 USER 185
