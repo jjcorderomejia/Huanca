@@ -26,29 +26,17 @@ spec:
     "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem"
     "spark.sql.shuffle.partitions": "48"
 
-  # emptyDir mounted at the image's WORKDIR (/opt/spark/work-dir) so the spark
-  # entrypoint can write java_opts.txt. fsGroup alone does NOT fix this because
-  # fsGroup only chowns mounted volumes — not the container's own filesystem.
-  # With this volume, kubelet sets ownership to GID 185 before the container
-  # starts, making the directory writable by UID 185 (spark user).
-  volumes:
-    - name: work-dir
-      emptyDir: {}
-
   driver:
     cores: 1
     coreLimit: "1200m"
     memory: "2g"
     serviceAccount: spark
     # runAsNonRoot enforces non-root at K8s admission without pinning the UID.
-    # fsGroup: 185 matches the spark USER in the Dockerfile (UID 185 from base image).
-    # If the base image UID ever changes, update fsGroup here AND in the executor section below.
+    # fsGroup: 1000 matches hadoop GID in the base image (ghcr.io/jjcorderomejia/spark:3.5.6-*).
+    # If the base image ever changes this GID, update fsGroup here AND in the executor section below.
     podSecurityContext:
       runAsNonRoot: true
-      fsGroup: 185
-    volumeMounts:
-      - name: work-dir
-        mountPath: /opt/spark/work-dir
+      fsGroup: 1000
     env:
       - name: REDPANDA_BOOTSTRAP
         value: "fraud-redpanda-0.fraud-redpanda.bigdata.svc.cluster.local:9092"
@@ -103,13 +91,10 @@ spec:
     instances: 2
     cores: 2
     memory: "3g"
-    # fsGroup must match driver — both use UID 185 from the same base image.
+    # fsGroup must match driver — both use hadoop GID 1000 from the same base image.
     podSecurityContext:
       runAsNonRoot: true
-      fsGroup: 185
-    volumeMounts:
-      - name: work-dir
-        mountPath: /opt/spark/work-dir
+      fsGroup: 1000
     env:
       - name: REDPANDA_BOOTSTRAP
         value: "fraud-redpanda-0.fraud-redpanda.bigdata.svc.cluster.local:9092"
