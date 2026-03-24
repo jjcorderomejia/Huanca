@@ -26,6 +26,15 @@ spec:
     "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem"
     "spark.sql.shuffle.partitions": "48"
 
+  # emptyDir mounted at the image's WORKDIR (/opt/spark/work-dir) so the spark
+  # entrypoint can write java_opts.txt. fsGroup alone does NOT fix this because
+  # fsGroup only chowns mounted volumes — not the container's own filesystem.
+  # With this volume, kubelet sets ownership to GID 185 before the container
+  # starts, making the directory writable by UID 185 (spark user).
+  volumes:
+    - name: work-dir
+      emptyDir: {}
+
   driver:
     cores: 1
     coreLimit: "1200m"
@@ -37,6 +46,9 @@ spec:
     podSecurityContext:
       runAsNonRoot: true
       fsGroup: 185
+    volumeMounts:
+      - name: work-dir
+        mountPath: /opt/spark/work-dir
     env:
       - name: REDPANDA_BOOTSTRAP
         value: "fraud-redpanda-0.fraud-redpanda.bigdata.svc.cluster.local:9092"
@@ -95,6 +107,9 @@ spec:
     podSecurityContext:
       runAsNonRoot: true
       fsGroup: 185
+    volumeMounts:
+      - name: work-dir
+        mountPath: /opt/spark/work-dir
     env:
       - name: REDPANDA_BOOTSTRAP
         value: "fraud-redpanda-0.fraud-redpanda.bigdata.svc.cluster.local:9092"
