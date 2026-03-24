@@ -33,10 +33,11 @@ ADD https://jdbc.postgresql.org/download/postgresql-42.7.3.jar \
 
 # Switch back to the Spark service user defined in the base image.
 # The base image (ghcr.io/jjcorderomejia/spark:3.5.6-*) uses 'hadoop' (UID 1000, GID 1000).
+# Numeric UID required — runAsNonRoot: true in K8s cannot verify named users at admission.
 # hadoop owns /opt/spark (755) — the entrypoint WORKDIR where java_opts.txt is written.
 # IMPORTANT: The SparkApplication manifest (spark-fraud-stream.yaml.tpl) sets:
 #   podSecurityContext.runAsNonRoot: true  — K8s enforces non-root at admission
 #   podSecurityContext.fsGroup: 1000       — matches hadoop GID for volume mounts
-# If the base image ever changes this user, update fsGroup in spark-fraud-stream.yaml.tpl
+# If the base image ever changes this UID, update fsGroup in spark-fraud-stream.yaml.tpl
 # to match. The two values must stay in sync.
-USER hadoop
+USER 1000
