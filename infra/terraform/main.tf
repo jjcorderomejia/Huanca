@@ -56,7 +56,7 @@ resource "kubernetes_cluster_role" "spark_role" {
     api_groups = [""]
     resources  = ["pods", "pods/log", "services", "configmaps", "secrets",
                   "persistentvolumeclaims"]
-    verbs      = ["get", "list", "watch", "create", "delete", "patch", "update"]
+    verbs      = ["get", "list", "watch", "create", "delete", "deletecollection", "patch", "update"]
   }
   rule {
     api_groups = ["sparkoperator.k8s.io"]

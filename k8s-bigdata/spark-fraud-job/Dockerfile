@@ -31,6 +31,9 @@ ADD https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aw
 ADD https://jdbc.postgresql.org/download/postgresql-42.7.3.jar \
     /opt/spark/jars/postgresql.jar
 
+# Docker ADD from URL creates files as root:root 600 — make all JARs readable by hadoop (UID 1000)
+RUN chmod 644 /opt/spark/jars/*.jar
+
 # Switch back to the Spark service user defined in the base image.
 # The base image (ghcr.io/jjcorderomejia/spark:3.5.6-*) uses 'hadoop' (UID 1000, GID 1000).
 # Numeric UID required — runAsNonRoot: true in K8s cannot verify named users at admission.
