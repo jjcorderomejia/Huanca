@@ -2,7 +2,7 @@
 Iceberg Compaction Job
 Merges small Parquet files into 128MB targets.
 Expires old snapshots (retain last 7).
-Runs daily via Airflow KubernetesPodOperator.
+Runs daily via Airflow SparkKubernetesOperator (Spark Operator cluster mode).
 """
 import logging
 import os
@@ -27,7 +27,6 @@ TABLES = [
 spark = (
     SparkSession.builder
     .appName("iceberg-compaction")
-    .master("local[*]")
     .config("spark.sql.extensions",
             "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
     .config("spark.sql.catalog.iceberg",
