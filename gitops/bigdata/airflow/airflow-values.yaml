@@ -39,6 +39,7 @@ scheduler:
     - name: spark-manifests
       configMap:
         name: compact-iceberg-spark-app
+        optional: true
   extraVolumeMounts:
     - name: spark-manifests
       mountPath: /opt/spark-manifests
