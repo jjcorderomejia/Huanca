@@ -30,17 +30,25 @@ serviceAccount:
   create: false
 
 createUserJob:
-  enabled: false
+  enabled: false   # admin created manually via Secret below — never default admin/admin
 
 scheduler:
   serviceAccount:
     name: airflow
+  extraVolumes:
+    - name: spark-manifests
+      configMap:
+        name: compact-iceberg-spark-app
+  extraVolumeMounts:
+    - name: spark-manifests
+      mountPath: /opt/spark-manifests
+      readOnly: true
 
 webserver:
   serviceAccount:
     name: airflow
   defaultUser:
-    enabled: false
+    enabled: false   # disable default admin/admin — we create admin via Secret below
 
 triggerer:
   serviceAccount:
@@ -55,7 +63,7 @@ dags:
 logs:
   persistence:
     enabled: true
-    existingClaim: airflow-logs
+    existingClaim: airflow-logs  # pre-created with ReadWriteOnce — local-path constraint
 
 postgresql:
   enabled: true
