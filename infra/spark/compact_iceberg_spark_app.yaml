@@ -1,0 +1,56 @@
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: compact-iceberg
+  namespace: bigdata
+spec:
+  type: Python
+  pythonVersion: "3"
+  mode: cluster
+  # image injected at runtime by fraud_feature_refresh DAG via FRAUD_SPARK_IMAGE Airflow Variable
+  image: "__SPARK_IMAGE__"
+  imagePullPolicy: IfNotPresent
+  mainApplicationFile: "local:///opt/spark/jobs/compact_iceberg.py"
+  sparkVersion: "3.5.0"
+  restartPolicy:
+    type: Never
+  driver:
+    cores: 1
+    memory: "1g"
+    serviceAccount: spark
+    env:
+      - name: MINIO_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: minio-secret
+            key: MINIO_ROOT_USER
+      - name: MINIO_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: minio-secret
+            key: MINIO_ROOT_PASSWORD
+      - name: ICEBERG_DB_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: airflow-postgresql
+            key: postgres-password
+  executor:
+    cores: 2
+    instances: 2
+    memory: "2g"
+    env:
+      - name: MINIO_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: minio-secret
+            key: MINIO_ROOT_USER
+      - name: MINIO_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: minio-secret
+            key: MINIO_ROOT_PASSWORD
+      - name: ICEBERG_DB_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: airflow-postgresql
+            key: postgres-password
