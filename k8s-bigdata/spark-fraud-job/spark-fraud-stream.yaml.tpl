@@ -8,7 +8,7 @@ spec:
   mode: cluster
   sparkVersion: "3.5.6"
   image: ghcr.io/${ORG}/fraud-spark-job:${GIT_SHA}
-  imagePullPolicy: IfNotPresent
+  imagePullPolicy: Always
   imagePullSecrets:
     - ghcr-creds
 

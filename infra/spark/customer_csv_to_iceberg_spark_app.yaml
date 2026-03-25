@@ -9,7 +9,7 @@ spec:
   mode: cluster
   # image injected at runtime by fraud_customer_refresh DAG via FRAUD_SPARK_IMAGE Airflow Variable
   image: "__SPARK_IMAGE__"
-  imagePullPolicy: IfNotPresent
+  imagePullPolicy: Always
   mainApplicationFile: "local:///opt/spark/jobs/customer_csv_to_iceberg.py"
   sparkVersion: "3.5.0"
   sparkConf:
