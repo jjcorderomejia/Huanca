@@ -69,10 +69,14 @@ triggerer:
     name: airflow
 
 dags:
-  persistence:
+  gitSync:
     enabled: true
-    storageClassName: local-path
-    size: 5Gi
+    repo: https://github.com/jjcorderomejia/Huanca.git
+    branch: main
+    subPath: dags
+    credentialsSecret: airflow-git-token-secret
+    period: 60s
+    depth: 1
 
 logs:
   persistence:
