@@ -45,6 +45,19 @@ scheduler:
       mountPath: /opt/spark-manifests
       readOnly: true
 
+dagProcessor:
+  serviceAccount:
+    name: airflow
+  extraVolumes:
+    - name: spark-manifests
+      configMap:
+        name: compact-iceberg-spark-app
+        optional: true
+  extraVolumeMounts:
+    - name: spark-manifests
+      mountPath: /opt/spark-manifests
+      readOnly: true
+
 webserver:
   serviceAccount:
     name: airflow
