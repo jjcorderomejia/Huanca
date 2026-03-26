@@ -121,7 +121,7 @@ def load_risk_profiles():
         spark.read
         .format("starrocks")
         .option("starrocks.fenodes", f"{SR_HOST}:8030")
-        .option("starrocks.jdbc.url", f"jdbc:mysql://{SR_HOST}:9030")
+        .option("starrocks.fe.jdbc.url", f"jdbc:mysql://{SR_HOST}:9030")
         .option("starrocks.table.identifier", f"{SR_DB}.risk_profiles")
         .option("starrocks.user", SR_USER)
         .option("starrocks.password", SR_PASSWORD)
