@@ -255,8 +255,8 @@ good_with_velocity = (
     .join(
         velocity.withWatermark("window_start", "5 minutes"),
         (good.user_id == velocity.v_user_id) &
-        (good.event_time >= velocity.window_start) &
-        (good.event_time < velocity.window_start + expr("INTERVAL 5 MINUTES")),
+        (velocity.window_start >= good.event_time - expr("INTERVAL 5 MINUTES")) &
+        (velocity.window_start <= good.event_time),
         "left"
     )
     .drop("v_user_id")
