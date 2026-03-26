@@ -233,11 +233,10 @@ good   = tagged.filter(col("dlq_reason").isNull()).drop("dlq_reason", "j")
 
 # ── FEATURE ENGINEERING ───────────────────────────────────────────────
 # Velocity: count per user in 5-min tumbling window.
-# Watermark = 5 min on both sides of the stream-stream join — bounds state size.
+# Watermark applied once per side at join time — avoids dual EventTimeWatermark on right side.
 # Transactions arriving >5min late get velocity_5min=1 (acceptable tradeoff).
 velocity = (
     good
-    .withWatermark("event_time", "5 minutes")
     .groupBy(window("event_time", "5 minutes"), col("user_id"))
     .agg(count("*").alias("velocity_5min"))
     .select(
@@ -247,17 +246,19 @@ velocity = (
     )
 )
 
+# watermark once per side, at join time only
+good_wm = good.withWatermark("event_time", "5 minutes")
+velocity_wm = velocity.withWatermark("window_start", "5 minutes")
+
 # Time-range condition on join — Spark evicts state once watermark passes window_start + 5 min.
 # window_start kept for audit (which 5-min bucket the transaction landed in).
 good_with_velocity = (
-    good
-    .withWatermark("event_time", "5 minutes")
-    .join(
-        velocity.withWatermark("window_start", "5 minutes"),
-        (good.user_id == velocity.v_user_id) &
-        (velocity.window_start >= good.event_time - expr("INTERVAL 5 MINUTES")) &
-        (velocity.window_start <= good.event_time),
-        "left"
+    good_wm.join(
+        velocity_wm,
+        (good_wm.user_id == velocity_wm.v_user_id) &
+        (good_wm.event_time >= velocity_wm.window_start) &
+        (good_wm.event_time < velocity_wm.window_start + expr("INTERVAL 5 MINUTES")),
+        "leftOuter"
     )
     .drop("v_user_id")
     .withColumn("velocity_5min",
