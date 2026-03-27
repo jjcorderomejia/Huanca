@@ -25,6 +25,10 @@ spec:
     "spark.hadoop.fs.s3a.path.style.access": "true"
     "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem"
     "spark.sql.shuffle.partitions": "48"
+    # Redpanda compatibility: force consumer-based offset fetching.
+    # Spark 3.4+ KafkaOffsetReaderAdmin uses AdminClient.describeTopics which
+    # times out against Redpanda — the deprecated consumer path works correctly.
+    "spark.sql.streaming.kafka.useDeprecatedOffsetFetching": "true"
 
   driver:
     cores: 1
