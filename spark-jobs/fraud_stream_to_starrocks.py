@@ -375,7 +375,7 @@ def write_all_sinks(batch_df, batch_id: int):
               case when score_geo      > 0 then 'GEO_IMPOSSIBLE' end
             )
         """))
-        .persist(StorageLevel.MEMORY_AND_DISK_SER)
+        .persist(StorageLevel.MEMORY_AND_DISK)
     )
 
     # ── OBSERVABILITY — single aggregation pass ────────────────────
