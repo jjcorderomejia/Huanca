@@ -206,9 +206,9 @@ def get_customers_df():
 # ── OBSERVABILITY ACCUMULATORS ─────────────────────────────────────────
 # Driver-side counters visible in Spark UI.
 # Guarded by iceberg.fraud.processed_batches — incremented only once per batch_id.
-acc_total    = spark.sparkContext.accumulator(0, "total_processed")
-acc_flagged  = spark.sparkContext.accumulator(0, "flagged_count")
-acc_geo_hits = spark.sparkContext.accumulator(0, "geo_hits")
+acc_total    = spark.sparkContext.accumulator(0)
+acc_flagged  = spark.sparkContext.accumulator(0)
+acc_geo_hits = spark.sparkContext.accumulator(0)
 
 # ── READ FROM REDPANDA ─────────────────────────────────────────────────
 raw = (
