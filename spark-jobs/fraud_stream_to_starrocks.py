@@ -186,6 +186,7 @@ def get_customers_df():
                     col("avg_amount_30d").cast("double")
                 )
             )
+            _ = df.schema  # force JVM analysis — raises AnalysisException here if table missing
         except Exception as e:
             if "TABLE_OR_VIEW_NOT_FOUND" in str(e) or "table or view" in str(e).lower():
                 logging.warning(json.dumps({
