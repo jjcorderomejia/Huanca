@@ -1,0 +1,14 @@
+#cloud-config
+# Node bootstrap for Hetzner servers in this lab.
+# Sets containerd root to the large data disk (/data, 462 GB)
+# to prevent DiskPressure on the OS disk as image layers accumulate.
+write_files:
+  - path: /etc/containerd/config.toml
+    owner: root:root
+    permissions: "0644"
+    content: |
+      version = 2
+      root = "/data/containerd"
+runcmd:
+  - mkdir -p /data/containerd
+  - systemctl restart containerd

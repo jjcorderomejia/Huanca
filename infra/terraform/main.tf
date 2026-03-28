@@ -5,10 +5,23 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = ">= 2.20.0"
     }
+    hcloud = {
+      source  = "hetznercloud/hcloud"
+      version = ">= 1.45.0"
+    }
   }
 }
 
 provider "kubernetes" {}
+
+# ── Hetzner Cloud provider ─────────────────────────────────────────────
+# Manages node lifecycle via cloud-init user_data on new Hetzner servers.
+# Token injected as TF_VAR_hcloud_token — never hardcoded.
+# When re-running the Terraform Job (Phase 0.5), add TF_VAR_hcloud_token
+# from the terraform-vars K8s secret.
+provider "hcloud" {
+  token = var.hcloud_token
+}
 
 # ── Namespaces (all pre-existing — Terraform reads only) ─────────────
 data "kubernetes_namespace" "bigdata" {
