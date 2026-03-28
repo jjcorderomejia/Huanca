@@ -169,19 +169,36 @@ threading.Thread(target=refresh_risk_broadcast, daemon=True).start()
 _customer_cache: dict = {"df": None, "loaded_at": 0.0}
 
 def get_customers_df():
-    """Returns customer enrichment DataFrame from Iceberg, refreshing if TTL expired."""
+    """Returns customer enrichment DataFrame from Iceberg, refreshing if TTL expired.
+    Falls back to empty schema DataFrame if table not yet populated (first-boot / Airflow
+    hasn't run yet). Stream degrades gracefully — plan and avg_amount_30d will be null
+    until the daily fraud_customer_refresh DAG seeds the data."""
     now = time.time()
     if _customer_cache["df"] is None or (now - _customer_cache["loaded_at"]) > CUSTOMER_CACHE_TTL:
-        _customer_cache["df"] = (
-            spark.read
-            .format("iceberg")
-            .load(CUSTOMER_ICEBERG_TABLE)
-            .select(
-                col("user_id").alias("c_user_id"),
-                col("plan"),
-                col("avg_amount_30d").cast("double")
+        try:
+            df = (
+                spark.read
+                .format("iceberg")
+                .load(CUSTOMER_ICEBERG_TABLE)
+                .select(
+                    col("user_id").alias("c_user_id"),
+                    col("plan"),
+                    col("avg_amount_30d").cast("double")
+                )
             )
-        )
+        except Exception as e:
+            if "TABLE_OR_VIEW_NOT_FOUND" in str(e) or "table or view" in str(e).lower():
+                logging.warning(json.dumps({
+                    "event": "customer_table_not_found",
+                    "table": CUSTOMER_ICEBERG_TABLE,
+                    "note": "using empty enrichment until Airflow seeds data"
+                }))
+                df = spark.createDataFrame(
+                    [], "c_user_id STRING, plan STRING, avg_amount_30d DOUBLE"
+                )
+            else:
+                raise
+        _customer_cache["df"] = df
         _customer_cache["loaded_at"] = now
     return _customer_cache["df"]
 
