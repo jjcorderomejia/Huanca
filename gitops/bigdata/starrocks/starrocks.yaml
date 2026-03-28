@@ -138,6 +138,15 @@ spec:
           env:
             - name: FE_SERVICE_NAME
               value: "starrocks-fe-svc"
+            # Tech debt: be_entrypoint.sh uses `mysql -u root` with no password to register
+            # with FE on every start. MYSQL_PWD is the standard MySQL client env var — the
+            # only way to pass a password to a script that doesn't accept --password.
+            # Required whenever BE restarts after root password is set (e.g. after eviction).
+            - name: MYSQL_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: starrocks-credentials
+                  key: root-password
           volumeMounts:
             - name: be-data
               mountPath: /opt/starrocks/be/storage
