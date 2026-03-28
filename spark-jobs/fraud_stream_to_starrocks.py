@@ -119,8 +119,11 @@ spark = (
 spark.sparkContext.setLogLevel("WARN")
 
 # ── RISK PROFILE BROADCAST CACHE ──────────────────────────────────────
-# Broadcast to all executors. Refreshed every RISK_CACHE_TTL_SEC seconds
-# via background daemon thread — zero StarRocks reads per batch after first load.
+# Lazy initialization — driver starts with an empty broadcast so streaming
+# queries begin immediately on cold start (empty risk_profiles is valid:
+# geo score defaults to 0, no false positives).
+# Background thread loads on first iteration (no sleep before first run),
+# then refreshes every RISK_CACHE_TTL_SEC seconds.
 # Lock prevents race between unpersist and active UDF calls on executors.
 RISK_CACHE_TTL = int(os.environ.get("RISK_CACHE_TTL_SEC", "60"))
 _risk_lock = threading.Lock()
@@ -139,13 +142,12 @@ def load_risk_profiles():
         .collectAsMap()
     )
 
-risk_bc = spark.sparkContext.broadcast(load_risk_profiles())
+risk_bc = spark.sparkContext.broadcast({})
 
 def refresh_risk_broadcast():
     global risk_bc
     backoff = 60
     while True:
-        time.sleep(RISK_CACHE_TTL)
         try:
             new_bc = spark.sparkContext.broadcast(load_risk_profiles())
             with _risk_lock:
@@ -156,6 +158,7 @@ def refresh_risk_broadcast():
             logging.error(json.dumps({"event": "risk_refresh_failed", "error": str(e)}))
             time.sleep(backoff)
             backoff = min(backoff * 2, 600)  # exponential backoff, cap at 10 min
+        time.sleep(RISK_CACHE_TTL)
 
 threading.Thread(target=refresh_risk_broadcast, daemon=True).start()
 
