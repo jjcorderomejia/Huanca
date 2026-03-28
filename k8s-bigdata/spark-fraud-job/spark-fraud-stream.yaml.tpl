@@ -90,6 +90,10 @@ spec:
         value: "50000"
       - name: CHECKPOINT_LOCATION
         value: "s3a://checkpoints/fraud-stream"
+    volumeMounts:
+      - name: redpanda-certs
+        mountPath: /etc/redpanda-certs
+        readOnly: true
 
   executor:
     instances: 2
@@ -122,6 +126,18 @@ spec:
           secretKeyRef:
             name: airflow-postgresql
             key: postgres-password
+    volumeMounts:
+      - name: redpanda-certs
+        mountPath: /etc/redpanda-certs
+        readOnly: true
+
+  volumes:
+    - name: redpanda-certs
+      secret:
+        secretName: fraud-redpanda-default-root-certificate
+        items:
+          - key: ca.crt
+            path: ca.crt
 
   restartPolicy:
     type: OnFailure
