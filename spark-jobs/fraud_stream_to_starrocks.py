@@ -321,6 +321,7 @@ final_df = pre_scored.select(
 
 # ── WRITE ALL SINKS ───────────────────────────────────────────────────
 def write_all_sinks(batch_df, batch_id: int):
+    global acc_total, acc_flagged, acc_geo_hits
 
     # ── CUSTOMER ENRICHMENT ───────────────────────────────────────
     # TTL-cached Iceberg read — reloads at most every CUSTOMER_CACHE_TTL seconds.
