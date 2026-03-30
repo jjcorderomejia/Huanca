@@ -433,7 +433,8 @@ def write_all_sinks(batch_df, batch_id: int):
             (
                 batch_df.filter(col("is_flagged"))
                 .select("transaction_id", "user_id", "fraud_score", "reasons",
-                        col("ingest_time").alias("flagged_at"))
+                        col("ingest_time").alias("flagged_at"),
+                        lit(None).cast("boolean").alias("reviewed"))
                 .write.format("starrocks")
                 .option("starrocks.fenodes", f"{SR_HOST}:8030")
                 .option("starrocks.fe.jdbc.url", f"jdbc:mysql://{SR_HOST}:9030")
@@ -455,6 +456,9 @@ def write_all_sinks(batch_df, batch_id: int):
                 .filter(col("rn") == 1)
                 .select(
                     "user_id",
+                    lit(None).cast("double").alias("avg_amount_30d"),
+                    lit(None).cast("double").alias("stddev_amount"),
+                    lit(None).cast("double").alias("avg_velocity_1h"),
                     col("merchant_lat").alias("last_merchant_lat"),
                     col("merchant_lon").alias("last_merchant_lon"),
                     col("event_time").alias("updated_at")
