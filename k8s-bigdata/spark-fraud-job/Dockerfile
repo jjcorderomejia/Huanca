@@ -11,6 +11,7 @@ RUN apt-get update && \
 # Copy Spark jobs
 COPY fraud_stream_to_starrocks.py /opt/spark/jobs/fraud_stream_to_starrocks.py
 COPY customer_csv_to_iceberg.py   /opt/spark/jobs/customer_csv_to_iceberg.py
+COPY init_iceberg_schema.py       /opt/spark/jobs/init_iceberg_schema.py
 COPY compact_iceberg.py           /opt/spark/jobs/compact_iceberg.py
 
 # StarRocks Spark connector JAR
