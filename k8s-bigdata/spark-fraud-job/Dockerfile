@@ -6,7 +6,7 @@ USER root
 RUN apt-get update && \
     apt-get install -y --no-install-recommends python3-pip && \
     rm -rf /var/lib/apt/lists/* && \
-    pip3 install --no-cache-dir pyarrow==14.0.1
+    pip3 install --no-cache-dir "pyarrow>=16.0.0,<18.0.0" pandas
 
 # Copy Spark jobs
 COPY fraud_stream_to_starrocks.py /opt/spark/jobs/fraud_stream_to_starrocks.py

@@ -30,7 +30,7 @@ from pyspark.sql.types import (
     StructType, StructField, StringType, DoubleType,
     TimestampType, LongType, ArrayType
 )
-from pyspark.sql.streaming import GroupStateTimeout
+from pyspark.sql.streaming.state import GroupStateTimeout
 
 # ── ENV ──────────────────────────────────────────────────────────────
 BOOTSTRAP               = os.environ["REDPANDA_BOOTSTRAP"]
@@ -88,61 +88,79 @@ VELOCITY_WINDOW_SEC    = 5 * 60   # 5-minute rolling window
 VELOCITY_STATE_TIMEOUT = "10 minutes"  # idle eviction — wall-clock, not event-time
 
 _VELOCITY_OUTPUT_SCHEMA = StructType([
-    StructField("transaction_id", StringType(),   True),
-    StructField("user_id",        StringType(),   True),
-    StructField("amount",         DoubleType(),   True),
-    StructField("merchant_id",    StringType(),   True),
-    StructField("merchant_lat",   DoubleType(),   True),
-    StructField("merchant_lon",   DoubleType(),   True),
-    StructField("status",         StringType(),   True),
+    StructField("transaction_id", StringType(),    True),
+    StructField("user_id",        StringType(),    True),
+    StructField("amount",         DoubleType(),    True),
+    StructField("merchant_id",    StringType(),    True),
+    StructField("merchant_lat",   DoubleType(),    True),
+    StructField("merchant_lon",   DoubleType(),    True),
+    StructField("status",         StringType(),    True),
     StructField("event_time",     TimestampType(), True),
     StructField("ingest_time",    TimestampType(), True),
-    StructField("velocity_5min",  LongType(),     True),
-    StructField("raw_json",       StringType(),   True),
-    StructField("k_topic",        StringType(),   True),
-    StructField("k_partition",    LongType(),     True),
-    StructField("k_offset",       LongType(),     True),
+    StructField("velocity_5min",  LongType(),      True),
+    StructField("raw_json",       StringType(),    True),
+    StructField("k_topic",        StringType(),    True),
+    StructField("k_partition",    LongType(),      True),
+    StructField("k_offset",       LongType(),      True),
 ])
 
-def _velocity_state_fn(user_id, records, state):
-    """
-    flatMapGroupsWithState function — rolling 5-min velocity per user.
+# State schema: single array field holding event-time epoch floats.
+# Tuple access: state.get[0] → list[float]
+_VELOCITY_STATE_SCHEMA = StructType([
+    StructField("timestamps", ArrayType(DoubleType()), True),
+])
 
-    State: list of event_time timestamps (float, seconds since epoch).
-    On each micro-batch: merge new timestamps with existing state, evict
-    entries older than VELOCITY_WINDOW_SEC, yield enriched rows with
-    velocity_5min = count of timestamps in the current window.
+def _velocity_state_fn(key, pdf_iter, state):
+    """
+    applyInPandasWithState function — rolling 5-min velocity per user.
+
+    State: array of event_time epochs (float, seconds since epoch).
+    Window cutoff uses max(event_time) in the batch — pure event-time
+    basis, tolerant of ingestion lag (no processing-time / event-time
+    mismatch that would deflate velocity on delayed data).
 
     On ProcessingTimeTimeout (user idle > VELOCITY_STATE_TIMEOUT):
     remove state — prevents unbounded state growth for inactive users.
     """
+    import pandas as pd
     import time
 
     if state.hasTimedOut:
         state.remove()
         return
 
-    now    = time.time()
-    cutoff = now - VELOCITY_WINDOW_SEC
+    # state.get is a tuple; index 0 is the timestamps array field
+    prev_ts    = list(state.get[0]) if state.exists else []
+    batch_pdfs = list(pdf_iter)  # consume iterator once — reused below
 
-    prev_ts = list(state.get) if state.exists else []
-    batch   = list(records)
-    new_ts  = [r.event_time.timestamp() for r in batch if r.event_time is not None]
+    # Collect event-time epochs from this micro-batch
+    new_ts = []
+    for pdf in batch_pdfs:
+        for ts in pdf["event_time"].dropna():
+            new_ts.append(pd.Timestamp(ts).timestamp())
 
-    all_ts   = [t for t in prev_ts + new_ts if t >= cutoff]
+    # Pure event-time cutoff: anchor to latest event seen, not wall clock.
+    # Falls back to time.time() only on a timeout batch (new_ts is empty).
+    all_seen = prev_ts + new_ts
+    now      = max(all_seen) if all_seen else time.time()
+    cutoff   = now - VELOCITY_WINDOW_SEC
+
+    all_ts   = [t for t in all_seen if t >= cutoff]
     velocity = len(all_ts)
 
-    state.update(all_ts)
+    state.update((all_ts,))
     state.setTimeoutDuration(VELOCITY_STATE_TIMEOUT)
 
-    for r in batch:
-        yield (
-            r.transaction_id, r.user_id, r.amount, r.merchant_id,
-            r.merchant_lat, r.merchant_lon, r.status,
-            r.event_time, r.ingest_time,
-            velocity,
-            r.raw_json, r.k_topic, r.k_partition, r.k_offset,
-        )
+    _out_cols = [
+        "transaction_id", "user_id", "amount", "merchant_id",
+        "merchant_lat", "merchant_lon", "status",
+        "event_time", "ingest_time",
+        "raw_json", "k_topic", "k_partition", "k_offset",
+    ]
+    for pdf in batch_pdfs:
+        out = pdf[_out_cols].copy()
+        out["velocity_5min"] = velocity
+        yield out
 
 # ── HAVERSINE UDF (geo distance in km) ───────────────────────────────
 # Used by compute_geo inside write_all_sinks foreachBatch
@@ -329,18 +347,19 @@ bad    = tagged.filter(col("dlq_reason").isNotNull())
 good   = tagged.filter(col("dlq_reason").isNull()).drop("dlq_reason", "j")
 
 # ── FEATURE ENGINEERING ───────────────────────────────────────────────
-# Velocity: rolling 5-min count per user via flatMapGroupsWithState.
-# ProcessingTimeTimeout — state evicts on wall-clock inactivity, not event-time.
+# Velocity: rolling 5-min count per user via applyInPandasWithState.
+# ProcessingTimeTimeout evicts idle user state on wall-clock inactivity.
+# Window cutoff anchored to max(event_time) — event-time correct, lag tolerant.
 # Emits one enriched row per input record immediately each micro-batch.
 # No watermark cascade, no stream-stream join buffering.
 final_df = (
     good
     .groupBy("user_id")
-    .flatMapGroupsWithState(
+    .applyInPandasWithState(
         func=_velocity_state_fn,
+        outputStructType=_VELOCITY_OUTPUT_SCHEMA,
+        stateStructType=_VELOCITY_STATE_SCHEMA,
         outputMode="append",
-        stateEncoder=ArrayType(DoubleType()),
-        outputEncoder=_VELOCITY_OUTPUT_SCHEMA,
         timeoutConf=GroupStateTimeout.ProcessingTimeTimeout,
     )
 )
