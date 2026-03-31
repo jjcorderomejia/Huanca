@@ -89,7 +89,7 @@ spec:
       - name: MAX_OFFSETS_PER_TRIGGER
         value: "50000"
       - name: CHECKPOINT_LOCATION
-        value: "s3a://checkpoints/fraud-stream"
+        value: "s3a://checkpoints/fraud-stream-v2"
     volumeMounts:
       - name: redpanda-certs
         mountPath: /etc/redpanda-certs
