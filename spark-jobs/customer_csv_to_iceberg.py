@@ -1,9 +1,8 @@
 """
-Customer CSV → Iceberg Init Job
+Customer CSV → Iceberg Data Load Job
 
-Reads customer enrichment CSV from ConfigMap mount and writes to
-iceberg.fraud.customers (createOrReplace — idempotent).
-Also creates iceberg.fraud.processed_batches if not exists.
+Reads customer enrichment CSV from ConfigMap mount and overwrites
+iceberg.fraud.customers (pure data load — DDL owned by init_iceberg_schema.py).
 
 Execution:
   - Initial deploy: K8s SparkApplication (customer-csv-to-iceberg.yaml.tpl)
@@ -41,22 +40,9 @@ customers = (
     )
 )
 
-# ── WRITE TO ICEBERG — createOrReplace (idempotent) ───────────────────
-customers.writeTo("iceberg.fraud.customers").createOrReplace()
+# ── WRITE TO ICEBERG — overwrite (pure data load, DDL in init_iceberg_schema.py) ──
+customers.writeTo("iceberg.fraud.customers").overwritePartitions()
 
 print(f"✅ {customers.count()} customer records written to iceberg.fraud.customers")
-
-# ── CREATE processed_batches TABLE IF NOT EXISTS ──────────────────────
-# Used by fraud streaming job for batch dedup — prevents accumulator
-# double-counting on foreachBatch retry.
-spark.sql("""
-    CREATE TABLE IF NOT EXISTS iceberg.fraud.processed_batches (
-        batch_id     BIGINT NOT NULL,
-        processed_at TIMESTAMP
-    )
-    USING iceberg
-""")
-
-print("✅ iceberg.fraud.processed_batches ready")
 
 spark.stop()
