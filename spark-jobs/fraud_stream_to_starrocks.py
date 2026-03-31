@@ -5,7 +5,7 @@ Redpanda → Spark Structured Streaming → StarRocks + Iceberg + DLQ
 Architecture:
   - At-least-once delivery (Kafka semantics)
   - Idempotent sink (StarRocks Primary Key upserts)
-  - Stateful feature engineering (5-min velocity window, bounded state)
+  - Stateful velocity via flatMapGroupsWithState + ProcessingTimeTimeout (no watermark dependency)
   - Rule-based fraud scoring (velocity · zscore · geo)
   - DLQ for malformed records
   - Iceberg append for full audit trail (JDBC catalog — safe concurrent writes)
@@ -24,11 +24,13 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, from_json, lit, current_timestamp, when,
     to_timestamp, expr, struct, to_json, udf,
-    count, sum as spark_sum, window, broadcast
+    count, sum as spark_sum, broadcast
 )
 from pyspark.sql.types import (
-    StructType, StructField, StringType, DoubleType
+    StructType, StructField, StringType, DoubleType,
+    TimestampType, LongType, ArrayType
 )
+from pyspark.sql.streaming import GroupStateTimeout
 
 # ── ENV ──────────────────────────────────────────────────────────────
 BOOTSTRAP               = os.environ["REDPANDA_BOOTSTRAP"]
@@ -77,6 +79,70 @@ txn_schema = StructType([
     StructField("status",         StringType(), True),
     StructField("timestamp",      StringType(), True),
 ])
+
+# ── VELOCITY STATE ────────────────────────────────────────────────────
+# Rolling 5-min transaction count per user maintained in Spark state store.
+# ProcessingTimeTimeout evicts idle users after VELOCITY_STATE_TIMEOUT —
+# ensures state is bounded even when a user stops transacting entirely.
+VELOCITY_WINDOW_SEC    = 5 * 60   # 5-minute rolling window
+VELOCITY_STATE_TIMEOUT = "10 minutes"  # idle eviction — wall-clock, not event-time
+
+_VELOCITY_OUTPUT_SCHEMA = StructType([
+    StructField("transaction_id", StringType(),   True),
+    StructField("user_id",        StringType(),   True),
+    StructField("amount",         DoubleType(),   True),
+    StructField("merchant_id",    StringType(),   True),
+    StructField("merchant_lat",   DoubleType(),   True),
+    StructField("merchant_lon",   DoubleType(),   True),
+    StructField("status",         StringType(),   True),
+    StructField("event_time",     TimestampType(), True),
+    StructField("ingest_time",    TimestampType(), True),
+    StructField("velocity_5min",  LongType(),     True),
+    StructField("raw_json",       StringType(),   True),
+    StructField("k_topic",        StringType(),   True),
+    StructField("k_partition",    LongType(),     True),
+    StructField("k_offset",       LongType(),     True),
+])
+
+def _velocity_state_fn(user_id, records, state):
+    """
+    flatMapGroupsWithState function — rolling 5-min velocity per user.
+
+    State: list of event_time timestamps (float, seconds since epoch).
+    On each micro-batch: merge new timestamps with existing state, evict
+    entries older than VELOCITY_WINDOW_SEC, yield enriched rows with
+    velocity_5min = count of timestamps in the current window.
+
+    On ProcessingTimeTimeout (user idle > VELOCITY_STATE_TIMEOUT):
+    remove state — prevents unbounded state growth for inactive users.
+    """
+    import time
+
+    if state.hasTimedOut:
+        state.remove()
+        return
+
+    now    = time.time()
+    cutoff = now - VELOCITY_WINDOW_SEC
+
+    prev_ts = list(state.get) if state.exists else []
+    batch   = list(records)
+    new_ts  = [r.event_time.timestamp() for r in batch if r.event_time is not None]
+
+    all_ts   = [t for t in prev_ts + new_ts if t >= cutoff]
+    velocity = len(all_ts)
+
+    state.update(all_ts)
+    state.setTimeoutDuration(VELOCITY_STATE_TIMEOUT)
+
+    for r in batch:
+        yield (
+            r.transaction_id, r.user_id, r.amount, r.merchant_id,
+            r.merchant_lat, r.merchant_lon, r.status,
+            r.event_time, r.ingest_time,
+            velocity,
+            r.raw_json, r.k_topic, r.k_partition, r.k_offset,
+        )
 
 # ── HAVERSINE UDF (geo distance in km) ───────────────────────────────
 # Used by compute_geo inside write_all_sinks foreachBatch
@@ -263,65 +329,31 @@ bad    = tagged.filter(col("dlq_reason").isNotNull())
 good   = tagged.filter(col("dlq_reason").isNull()).drop("dlq_reason", "j")
 
 # ── FEATURE ENGINEERING ───────────────────────────────────────────────
-# Velocity: count per user in 5-min tumbling window.
-# Watermark MUST be applied to the source stream before aggregation — Spark
-# requires this to track late-data eviction through the window operator and
-# allow append output mode on the aggregated streaming DataFrame.
-# Transactions arriving >5min late get velocity_5min=1 (acceptable tradeoff).
-good_wm = good.withWatermark("event_time", "5 minutes")
-
-velocity = (
-    good_wm
-    .groupBy(window("event_time", "5 minutes"), col("user_id"))
-    .agg(count("*").alias("velocity_5min"))
-    .select(
-        col("user_id").alias("v_user_id"),
-        col("velocity_5min"),
-        col("window.start").alias("window_start")
+# Velocity: rolling 5-min count per user via flatMapGroupsWithState.
+# ProcessingTimeTimeout — state evicts on wall-clock inactivity, not event-time.
+# Emits one enriched row per input record immediately each micro-batch.
+# No watermark cascade, no stream-stream join buffering.
+final_df = (
+    good
+    .groupBy("user_id")
+    .flatMapGroupsWithState(
+        func=_velocity_state_fn,
+        outputMode="append",
+        stateEncoder=ArrayType(DoubleType()),
+        outputEncoder=_VELOCITY_OUTPUT_SCHEMA,
+        timeoutConf=GroupStateTimeout.ProcessingTimeTimeout,
     )
-)
-
-# Secondary watermark on velocity's window_start drives join state eviction:
-# Spark drops velocity state once its watermark advances past window_start + 5 min
-# (bounded by the INTERVAL condition on the join below).
-velocity_wm = velocity.withWatermark("window_start", "5 minutes")
-
-# Time-range condition on join — Spark evicts state once watermark passes window_start + 5 min.
-# window_start kept for audit (which 5-min bucket the transaction landed in).
-good_with_velocity = (
-    good_wm.join(
-        velocity_wm,
-        (good_wm.user_id == velocity_wm.v_user_id) &
-        (good_wm.event_time >= velocity_wm.window_start) &
-        (good_wm.event_time < velocity_wm.window_start + expr("INTERVAL 5 MINUTES")),
-        "leftOuter"
-    )
-    .drop("v_user_id")
-    .withColumn("velocity_5min",
-        when(col("velocity_5min").isNull(), lit(1)).otherwise(col("velocity_5min")))
-)
-
-# ── PRE-SCORE (velocity only) ──────────────────────────────────────────
-# Customer enrichment, zscore, geo, and final scoring happen in foreachBatch
-# where Iceberg (customers) and risk_profiles broadcast are available.
-pre_scored = (
-    good_with_velocity
-    .withColumn("score_velocity",
-        when(col("velocity_5min") > VELOCITY_THRESHOLD, lit(40)).otherwise(lit(0)))
-)
-
-final_df = pre_scored.select(
-    "transaction_id", "user_id", "amount", "merchant_id",
-    "merchant_lat", "merchant_lon", "status",
-    "event_time", "ingest_time",
-    "velocity_5min", "window_start",
-    "score_velocity",
-    "raw_json", "k_topic", "k_partition", "k_offset"
 )
 
 # ── WRITE ALL SINKS ───────────────────────────────────────────────────
 def write_all_sinks(batch_df, batch_id: int):
     global acc_total, acc_flagged, acc_geo_hits
+
+    # ── VELOCITY SCORE ────────────────────────────────────────────
+    # velocity_5min arrives from _velocity_state_fn (flatMapGroupsWithState).
+    # Score computed here to keep the streaming plan free of Column expressions.
+    batch_df = batch_df.withColumn("score_velocity",
+        when(col("velocity_5min") > VELOCITY_THRESHOLD, lit(40)).otherwise(lit(0)))
 
     # ── CUSTOMER ENRICHMENT ───────────────────────────────────────
     # TTL-cached Iceberg read — reloads at most every CUSTOMER_CACHE_TTL seconds.
