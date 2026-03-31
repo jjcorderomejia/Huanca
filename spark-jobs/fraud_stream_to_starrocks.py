@@ -85,7 +85,7 @@ txn_schema = StructType([
 # ProcessingTimeTimeout evicts idle users after VELOCITY_STATE_TIMEOUT —
 # ensures state is bounded even when a user stops transacting entirely.
 VELOCITY_WINDOW_SEC    = 5 * 60   # 5-minute rolling window
-VELOCITY_STATE_TIMEOUT = "10 minutes"  # idle eviction — wall-clock, not event-time
+VELOCITY_STATE_TIMEOUT = 10 * 60 * 1000  # 10-minute idle eviction in ms — wall-clock, not event-time
 
 _VELOCITY_OUTPUT_SCHEMA = StructType([
     StructField("transaction_id", StringType(),    True),
