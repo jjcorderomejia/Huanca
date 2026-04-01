@@ -1,7 +1,7 @@
 """
 DAG 2: Daily feature refresh at 02:00.
 """
-import yaml
+import json
 from airflow import DAG
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 from airflow.providers.cncf.kubernetes.operators.spark_kubernetes import SparkKubernetesOperator
@@ -16,8 +16,6 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-SPARK_IMAGE = Variable.get("FRAUD_SPARK_IMAGE")  # Set in Phase 6.2 — no default, fails fast if missing
-
 SR_PASSWORD_ENV = k8s.V1EnvVar(
     name="SR_PASSWORD",
     value_from=k8s.V1EnvVarSource(
@@ -27,10 +25,9 @@ SR_PASSWORD_ENV = k8s.V1EnvVar(
     )
 )
 
-# Load SparkApplication manifest from ConfigMap-mounted path — single source of truth
-with open("/opt/spark-manifests/compact_iceberg_spark_app.yaml") as _f:
-    _compact_spec = yaml.safe_load(_f)
-_compact_spec["spec"]["image"] = SPARK_IMAGE
+# Load Spark spec from Airflow Variable — no filesystem dependency at parse or execution time
+_compact_spec = json.loads(Variable.get("COMPACT_ICEBERG_SPARK_SPEC"))
+_compact_spec["spec"]["image"] = Variable.get("FRAUD_SPARK_IMAGE")
 
 def sla_miss_callback(dag, task_list, blocking_task_list, slas, blocking_tis):
     print(f"SLA MISS — DAG: {dag.dag_id} | Missed: {task_list} | Blocking: {blocking_task_list}")

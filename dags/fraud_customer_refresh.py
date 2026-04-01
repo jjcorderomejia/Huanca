@@ -3,7 +3,7 @@ DAG 3: Daily customer CSV to Iceberg refresh at 02:00.
 Loads customer enrichment data from customer-csv ConfigMap into fraud.customers Iceberg table.
 SparkKubernetesOperator exit status is the verification — Spark fails fast on write errors.
 """
-import yaml
+import json
 from airflow import DAG
 from airflow.providers.cncf.kubernetes.operators.spark_kubernetes import SparkKubernetesOperator
 from airflow.models import Variable
@@ -16,12 +16,9 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-SPARK_IMAGE = Variable.get("FRAUD_SPARK_IMAGE")  # Set in Phase 6.2 — no default, fails fast if missing
-
-# Load SparkApplication manifest from ConfigMap-mounted path — single source of truth
-with open("/opt/spark-manifests/customer_csv_to_iceberg_spark_app.yaml") as _f:
-    _customer_spec = yaml.safe_load(_f)
-_customer_spec["spec"]["image"] = SPARK_IMAGE
+# Load Spark spec from Airflow Variable — no filesystem dependency at parse or execution time
+_customer_spec = json.loads(Variable.get("CUSTOMER_CSV_SPARK_SPEC"))
+_customer_spec["spec"]["image"] = Variable.get("FRAUD_SPARK_IMAGE")
 
 def sla_miss_callback(dag, task_list, blocking_task_list, slas, blocking_tis):
     print(f"SLA MISS — DAG: {dag.dag_id} | Missed: {task_list} | Blocking: {blocking_task_list}")

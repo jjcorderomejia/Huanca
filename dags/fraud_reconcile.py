@@ -36,7 +36,7 @@ with DAG(
         arguments=[
             'set -euo pipefail; '
             'LAG=$(rpk group describe fraud-stream-consumer '
-            '-b fraud-redpanda-0.fraud-redpanda.bigdata.svc.cluster.local:9093 '
+            '--brokers fraud-redpanda-0.fraud-redpanda.bigdata.svc.cluster.local:9093 '
             '| grep transactions-raw | awk \'{sum+=$NF} END {print sum+0}\'); '
             'echo "Consumer lag: ${LAG}"; '
             'if [ "${LAG}" -gt "10000" ]; then '
