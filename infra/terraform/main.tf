@@ -138,6 +138,11 @@ resource "kubernetes_cluster_role" "airflow_role" {
     resources  = ["pods", "pods/log", "pods/exec"]
     verbs      = ["get", "list", "watch", "create", "delete", "patch"]
   }
+  rule {
+    api_groups = ["sparkoperator.k8s.io"]
+    resources  = ["sparkapplications", "scheduledsparkapplications"]
+    verbs      = ["get", "list", "watch", "create", "delete", "patch", "update"]
+  }
 }
 
 resource "kubernetes_cluster_role_binding" "airflow_binding" {
@@ -150,6 +155,20 @@ resource "kubernetes_cluster_role_binding" "airflow_binding" {
   subject {
     kind      = "ServiceAccount"
     name      = kubernetes_service_account.airflow.metadata[0].name
+    namespace = data.kubernetes_namespace.bigdata.metadata[0].name
+  }
+}
+
+resource "kubernetes_cluster_role_binding" "airflow_worker_binding" {
+  metadata { name = "airflow-worker-role-binding" }
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "ClusterRole"
+    name      = kubernetes_cluster_role.airflow_role.metadata[0].name
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = "airflow-worker"
     namespace = data.kubernetes_namespace.bigdata.metadata[0].name
   }
 }
