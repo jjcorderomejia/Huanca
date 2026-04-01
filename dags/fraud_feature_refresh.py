@@ -107,7 +107,7 @@ with DAG(
     compact_iceberg = SparkKubernetesOperator(
         task_id="compact_iceberg_tables",
         namespace="bigdata",
-        application_file=_compact_spec,
+        application_file=json.dumps(_compact_spec),
         kubernetes_conn_id="kubernetes_default",
         do_xcom_push=False,
         sla=timedelta(hours=2),

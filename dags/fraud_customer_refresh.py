@@ -37,7 +37,7 @@ with DAG(
     load_customers = SparkKubernetesOperator(
         task_id="load_customer_csv_to_iceberg",
         namespace="bigdata",
-        application_file=_customer_spec,
+        application_file=json.dumps(_customer_spec),
         kubernetes_conn_id="kubernetes_default",
         do_xcom_push=False,
         sla=timedelta(hours=1),
