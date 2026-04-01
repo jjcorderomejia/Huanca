@@ -73,6 +73,9 @@ spec:
           secretKeyRef:
             name: airflow-postgresql
             key: postgres-password
+    volumeMounts:
+      - name: enrichment
+        mountPath: /opt/enrichment
   volumes:
     - name: enrichment
       configMap:
