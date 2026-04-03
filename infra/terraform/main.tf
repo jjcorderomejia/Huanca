@@ -17,8 +17,6 @@ provider "kubernetes" {}
 # ── Hetzner Cloud provider ─────────────────────────────────────────────
 # Manages node lifecycle via cloud-init user_data on new Hetzner servers.
 # Token injected as TF_VAR_hcloud_token — never hardcoded.
-# When re-running the Terraform Job (Phase 0.5), add TF_VAR_hcloud_token
-# from the terraform-vars K8s secret.
 provider "hcloud" {
   token = var.hcloud_token
 }
@@ -140,7 +138,7 @@ resource "kubernetes_cluster_role" "airflow_role" {
   }
   rule {
     api_groups = ["sparkoperator.k8s.io"]
-    resources  = ["sparkapplications", "scheduledsparkapplications"]
+    resources  = ["sparkapplications", "sparkapplications/status", "scheduledsparkapplications"]
     verbs      = ["get", "list", "watch", "create", "delete", "patch", "update"]
   }
 }
