@@ -303,7 +303,6 @@ raw = (
     .option("startingOffsets", STARTING_OFFSETS)
     .option("failOnDataLoss", "false")
     .option("maxOffsetsPerTrigger", MAX_OFFSETS_PER_TRIGGER)  # cap batch size — prevent OOM on backlog
-    .option("kafka.group.id", "fraud-spark-consumer")
     .options(**_KAFKA_SSL)
     .load()
 )
