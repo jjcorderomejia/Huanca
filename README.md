@@ -2,8 +2,6 @@
 
 A end-to-end fraud detection pipeline running on Kubernetes. REST endpoint accepts transactions, Spark scores them in real time against velocity, statistical, and geospatial signals, results land in StarRocks for sub-second querying, and a live dashboard shows what's happening now.
 
-Built to go deep on the streaming stack — not a tutorial project.
-
 ---
 
 ## How it works
@@ -30,13 +28,13 @@ flowchart LR
     StarRocks --> Dashboard
 ```
 
-Transactions enter through the FastAPI backend, which validates the payload and produces to Redpanda synchronously — the 202 response only returns after the broker acknowledges. Redpanda was chosen over Kafka for its lower operational overhead on a single-node deployment while keeping full Kafka API compatibility, meaning the Spark consumer and any downstream tooling require no changes if the broker is swapped out.
+The backend produces to Redpanda and returns 202 only after the broker acknowledges — no fire-and-forget. Redpanda over Kafka: same wire protocol, significantly less operational overhead, and no ZooKeeper. Anything downstream that speaks Kafka speaks Redpanda without modification.
 
-Spark Structured Streaming consumes `transactions-raw` in micro-batches (10s trigger). The scoring logic runs inside `foreachBatch`, which gives full DataFrame semantics while writing to multiple sinks atomically — if StarRocks or Iceberg writes fail, the checkpoint doesn't advance and the batch replays. This is intentional: partial writes between the hot store and the data lake would create reconciliation problems that are hard to detect and harder to fix.
+Spark consumes `transactions-raw` in 10-second micro-batches. All scoring and sink writes happen inside `foreachBatch` — this matters because it lets StarRocks and Iceberg be written in the same atomic step. If either write fails, the checkpoint doesn't advance and the batch replays cleanly. The alternative (separate streaming queries per sink) would let one sink advance while the other fails, producing divergence that's painful to detect and painful to fix.
 
-StarRocks serves the hot path — the dashboard and API query it directly for sub-second aggregations over the last hour. Iceberg on MinIO serves the cold path — append-only columnar storage with daily compaction, designed for historical analysis and reprocessing. The two stores have different retention and query characteristics but are always written from the same batch, so they stay in sync by construction.
+The hot/cold split between StarRocks and Iceberg is intentional. StarRocks handles sub-second aggregations over recent data — the dashboard never waits. Iceberg handles everything else: historical queries, backfills, future model training. Both stores receive every transaction from the same batch, so they're never out of sync.
 
-Flagged transactions (score ≥ 60) are also published to the `fraud-alerts` Redpanda topic, keeping the pipeline open for downstream consumers — a case management system, a notification service, or a model retraining job — without coupling them to the scoring logic. Malformed records that fail schema validation are routed to `transactions-dlq` rather than dropped, so nothing is silently lost.
+Flagged transactions are also published to `fraud-alerts` — a downstream hook for case management, alerting, or model retraining without touching the scoring pipeline. Malformed records go to `transactions-dlq`, not `/dev/null`.
 
 Each transaction gets three independent scores combined into a single `fraud_score` [0–100]:
 
@@ -68,7 +66,7 @@ Transactions scoring ≥ 60 are flagged. All thresholds are env-var driven.
 
 ---
 
-## A few things worth noting
+## Design decisions
 
 **Velocity uses processing-time state, not watermarks.** Watermark-based aggregation deflates counts when data arrives late — for a fraud velocity signal you want wall-clock rate, not event-time bucketing. `flatMapGroupsWithState` with `ProcessingTimeTimeout` gives you that.
 
