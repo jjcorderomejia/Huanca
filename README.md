@@ -6,39 +6,28 @@ End-to-end streaming fraud detection pipeline built on Kubernetes. Transactions 
 
 ## Architecture
 
-```
-                         ┌─────────────────────────────────────────────────────┐
-                         │                  Kubernetes (bigdata ns)             │
-                         │                                                      │
-  POST /api/transaction  │  ┌─────────────┐    transactions-raw                │
- ──────────────────────► │  │  FastAPI    │──────────────────►┐                │
-  X-Api-Key auth         │  │  Backend    │                   │                │
-                         │  └─────────────┘            ┌──────▼──────┐        │
-                         │                             │  Redpanda   │        │
-                         │                             │  (Kafka API)│        │
-                         │                             └──────┬──────┘        │
-                         │                                    │                │
-                         │              ┌─────────────────────▼──────────────┐ │
-                         │              │     Spark Structured Streaming      │ │
-                         │              │                                     │ │
-                         │              │  • flatMapGroupsWithState velocity  │ │
-                         │              │  • z-score amount anomaly           │ │
-                         │              │  • Haversine geo-speed check        │ │
-                         │              │  • DLQ for malformed records        │ │
-                         │              │  • Checkpoint: MinIO s3a://         │ │
-                         │              └────┬──────────────┬─────────────────┘ │
-                         │                   │              │                   │
-                         │          ┌────────▼───┐   ┌──────▼──────┐           │
-                         │          │ StarRocks  │   │Apache Iceberg│           │
-                         │          │ (OLAP)     │   │on MinIO      │           │
-                         │          └────────┬───┘   └─────────────┘           │
-                         │                   │                                  │
-                         │          ┌────────▼───────────────┐                 │
-                         │          │  React Dashboard        │                 │
-                         │          │  FastAPI /api/stats     │                 │
-                         │          │  FastAPI /api/fraud-scores               │
-                         │          └─────────────────────────┘                │
-                         └─────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Client(["Client\nPOST /api/transaction"])
+    Backend["FastAPI Backend\nX-Api-Key auth"]
+    Redpanda["Redpanda\nKafka-compatible broker\nTLS enabled"]
+    Spark["Spark Structured Streaming\nvelocity · z-score · geo-speed\nforeachBatch dual-sink"]
+    Checkpoint[("MinIO\nCheckpoint\ns3a://checkpoints/fraud-stream-v2")]
+    StarRocks[("StarRocks\nOLAP — sub-second queries")]
+    Iceberg[("Apache Iceberg\nData Lake on MinIO")]
+    Alerts["Redpanda\nfraud-alerts topic"]
+    DLQ["Redpanda\ntransactions-dlq"]
+    Dashboard["React Dashboard\nnginx + FastAPI /api/*"]
+
+    Client -->|HTTP 202| Backend
+    Backend -->|produce| Redpanda
+    Redpanda -->|transactions-raw| Spark
+    Spark -->|checkpoint offsets| Checkpoint
+    Spark -->|fraud_scores + transactions| StarRocks
+    Spark -->|transactions| Iceberg
+    Spark -->|score ≥ 60| Alerts
+    Spark -->|malformed| DLQ
+    StarRocks -->|stats + scores| Dashboard
 ```
 
 ---
