@@ -47,7 +47,7 @@ function FraudTable({ scores }) {
     <div style={{ overflowX: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
-          <tr style={{ background: "#f7f8fa", color: "#999", fontSize: 11, textTransform: "uppercase", letterSpacing: 1 }}>
+          <tr style={{ background: "#f7f8fa", color: "#555", fontSize: 12, textTransform: "uppercase", letterSpacing: 1 }}>
             {["Transaction ID", "User", "Score", "Reasons", "Flagged At"].map(h => (
               <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontWeight: 600, borderBottom: "1px solid #e8e8e8" }}>{h}</th>
             ))}
@@ -57,20 +57,20 @@ function FraudTable({ scores }) {
           {scores.map((s, i) => (
             <tr key={s.transaction_id}
               style={{ background: i % 2 ? "#fafafa" : "#fff", borderBottom: "1px solid #f0f0f0" }}>
-              <td style={{ padding: "8px 14px", fontFamily: "monospace", fontSize: 11, color: "#aaa" }}>
+              <td style={{ padding: "8px 14px", fontFamily: "monospace", fontSize: 11, color: "#777" }}>
                 {s.transaction_id?.slice(0, 8)}…
               </td>
               <td style={{ padding: "8px 14px", color: "#1a1a2e", fontWeight: 500 }}>{s.user_id}</td>
               <td style={{ padding: "8px 14px" }}><ScoreBadge score={s.fraud_score} /></td>
               <td style={{ padding: "8px 14px", color: "#666", fontSize: 12 }}>{s.reasons}</td>
-              <td style={{ padding: "8px 14px", color: "#aaa", fontSize: 11 }}>
+              <td style={{ padding: "8px 14px", color: "#777", fontSize: 12 }}>
                 {s.flagged_at?.slice(0, 19).replace("T", " ")}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-      <div style={{ color: "#bbb", fontSize: 11, padding: "6px 14px" }}>
+      <div style={{ color: "#777", fontSize: 12, padding: "6px 14px" }}>
         Showing {scores.length} most recent alerts
       </div>
     </div>
@@ -157,7 +157,7 @@ export default function App() {
             <h1 style={{ color: "#e94560", margin: 0, fontSize: 20, fontWeight: 700, letterSpacing: 1 }}>
               FRAUD DETECTION
             </h1>
-            <div style={{ color: "#bbb", fontSize: 11, marginTop: 2 }}>
+            <div style={{ color: "#777", fontSize: 12, marginTop: 2 }}>
               Redpanda → Spark → StarRocks
             </div>
           </div>
@@ -167,7 +167,7 @@ export default function App() {
             <span style={{ color: error ? "#e53e3e" : "#38a169", fontSize: 12, fontWeight: 500 }}>
               {error ? "Disconnected" : "Live"}
             </span>
-            <span style={{ color: "#ccc", fontSize: 12, marginLeft: 8 }}>
+            <span style={{ color: "#888", fontSize: 12, marginLeft: 8 }}>
               {stats?.last_ingest?.slice(0, 19).replace("T", " ")} UTC
             </span>
           </div>
@@ -217,7 +217,7 @@ export default function App() {
                       }}>
                         <span style={{ color: "#1a1a2e", fontSize: 13, fontWeight: 500 }}>{u.user_id}</span>
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                          <span style={{ color: "#aaa", fontSize: 11 }}>{u.flagged_count} flags</span>
+                          <span style={{ color: "#777", fontSize: 12 }}>{u.flagged_count} flags</span>
                           <ScoreBadge score={u.max_score} />
                         </div>
                       </div>
@@ -231,10 +231,10 @@ export default function App() {
                             boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
                 <div style={{ padding: "16px 20px", borderBottom: "1px solid #f0f0f0",
                               display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ color: "#999", fontSize: 11, textTransform: "uppercase", letterSpacing: 1 }}>
+                  <span style={{ color: "#555", fontSize: 12, textTransform: "uppercase", letterSpacing: 1 }}>
                     Recent Fraud Alerts
                   </span>
-                  <span style={{ color: "#ccc", fontSize: 11 }}>Auto-refreshes every 5s</span>
+                  <span style={{ color: "#888", fontSize: 12 }}>Auto-refreshes every 5s</span>
                 </div>
                 {scores.length === 0
                   ? <div style={{ color: "#ccc", textAlign: "center", padding: 40, fontSize: 13 }}>
