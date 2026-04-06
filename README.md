@@ -30,6 +30,14 @@ flowchart LR
     StarRocks --> Dashboard
 ```
 
+Transactions enter through the FastAPI backend, which validates the payload and produces to Redpanda synchronously — the 202 response only returns after the broker acknowledges. Redpanda was chosen over Kafka for its lower operational overhead on a single-node deployment while keeping full Kafka API compatibility, meaning the Spark consumer and any downstream tooling require no changes if the broker is swapped out.
+
+Spark Structured Streaming consumes `transactions-raw` in micro-batches (10s trigger). The scoring logic runs inside `foreachBatch`, which gives full DataFrame semantics while writing to multiple sinks atomically — if StarRocks or Iceberg writes fail, the checkpoint doesn't advance and the batch replays. This is intentional: partial writes between the hot store and the data lake would create reconciliation problems that are hard to detect and harder to fix.
+
+StarRocks serves the hot path — the dashboard and API query it directly for sub-second aggregations over the last hour. Iceberg on MinIO serves the cold path — append-only columnar storage with daily compaction, designed for historical analysis and reprocessing. The two stores have different retention and query characteristics but are always written from the same batch, so they stay in sync by construction.
+
+Flagged transactions (score ≥ 60) are also published to the `fraud-alerts` Redpanda topic, keeping the pipeline open for downstream consumers — a case management system, a notification service, or a model retraining job — without coupling them to the scoring logic. Malformed records that fail schema validation are routed to `transactions-dlq` rather than dropped, so nothing is silently lost.
+
 Each transaction gets three independent scores combined into a single `fraud_score` [0–100]:
 
 | Signal | Approach | Weight |
