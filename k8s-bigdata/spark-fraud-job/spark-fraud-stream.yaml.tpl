@@ -98,7 +98,8 @@ spec:
   executor:
     instances: 2
     cores: 2
-    memory: "3g"
+    memory: "8g"
+    memoryOverhead: "1g"
     # fsGroup must match driver — both use hadoop GID 1000 from the same base image.
     podSecurityContext:
       runAsNonRoot: true
