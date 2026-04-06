@@ -23,7 +23,7 @@ function StatCard({ label, value, color }) {
       borderRadius: 8, padding: "16px 24px", minWidth: 160, flex: "1 1 160px",
       boxShadow: "0 1px 4px rgba(0,0,0,0.06)"
     }}>
-      <div style={{ color: "#999", fontSize: 11, textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
+      <div style={{ color: "#555", fontSize: 12, textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
       <div style={{ color: "#1a1a2e", fontSize: 32, fontWeight: "bold", marginTop: 4 }}>{value ?? "—"}</div>
     </div>
   );
