@@ -1,175 +1,124 @@
-# Huanca — Real-Time Payment Fraud Detection System
+# Huanca — Real-Time Payment Fraud Detection
 
-End-to-end streaming fraud detection pipeline built on Kubernetes. Transactions are ingested via REST, scored in real time using velocity, statistical, and geospatial signals, persisted to an OLAP store for sub-second querying, and surfaced on a live dashboard — all running on a single-node K8s cluster to demonstrate production engineering patterns at minimal infrastructure cost.
+A end-to-end fraud detection pipeline running on Kubernetes. REST endpoint accepts transactions, Spark scores them in real time against velocity, statistical, and geospatial signals, results land in StarRocks for sub-second querying, and a live dashboard shows what's happening now.
+
+Built to go deep on the streaming stack — not a tutorial project.
 
 ---
 
-## Architecture
+## How it works
 
 ```mermaid
-flowchart TD
-    Client(["Client\nPOST /api/transaction"])
-    Backend["FastAPI Backend\nX-Api-Key auth"]
-    Redpanda["Redpanda\nKafka-compatible broker\nTLS enabled"]
-    Spark["Spark Structured Streaming\nvelocity · z-score · geo-speed\nforeachBatch dual-sink"]
-    Checkpoint[("MinIO\nCheckpoint\ns3a://checkpoints/fraud-stream-v2")]
-    StarRocks[("StarRocks\nOLAP — sub-second queries")]
-    Iceberg[("Apache Iceberg\nData Lake on MinIO")]
-    Alerts["Redpanda\nfraud-alerts topic"]
-    DLQ["Redpanda\ntransactions-dlq"]
-    Dashboard["React Dashboard\nnginx + FastAPI /api/*"]
+flowchart LR
+    Client(["POST /api/transaction"])
+    Backend["FastAPI\nX-Api-Key auth"]
+    Redpanda["Redpanda\n(Kafka-compatible, TLS)"]
+    Spark["Spark Structured Streaming\nvelocity · z-score · geo"]
+    StarRocks[("StarRocks\nOLAP")]
+    Iceberg[("Iceberg\non MinIO")]
+    Alerts["fraud-alerts\ntopic"]
+    DLQ["transactions-dlq"]
+    Dashboard["React Dashboard"]
 
-    Client -->|HTTP 202| Backend
-    Backend -->|produce| Redpanda
-    Redpanda -->|transactions-raw| Spark
-    Spark -->|checkpoint offsets| Checkpoint
-    Spark -->|fraud_scores + transactions| StarRocks
-    Spark -->|transactions| Iceberg
+    Client --> Backend
+    Backend -->|transactions-raw| Redpanda
+    Redpanda --> Spark
+    Spark --> StarRocks
+    Spark --> Iceberg
     Spark -->|score ≥ 60| Alerts
     Spark -->|malformed| DLQ
-    StarRocks -->|stats + scores| Dashboard
+    StarRocks --> Dashboard
 ```
+
+Each transaction gets three independent scores combined into a single `fraud_score` [0–100]:
+
+| Signal | Approach | Weight |
+|--------|----------|--------|
+| Velocity | `flatMapGroupsWithState` — rolling 5-min tx count per user | 40 pts |
+| Amount anomaly | Z-score vs per-user running mean/stddev (from StarRocks) | 30 pts |
+| Geo-speed | Haversine distance ÷ elapsed time between consecutive transactions | 30 pts |
+
+Transactions scoring ≥ 60 are flagged. All thresholds are env-var driven.
 
 ---
 
 ## Stack
 
-| Component | Technology | Version |
-|-----------|-----------|---------|
-| Message broker | Redpanda (Kafka-compatible) | Operator v2 |
-| Stream processing | Apache Spark Structured Streaming | 3.5.6 |
-| OLAP store | StarRocks | 3.2.11 |
+| Layer | Technology | Version |
+|-------|-----------|---------|
+| Broker | Redpanda (Kafka API) | Operator v2 |
+| Streaming | Apache Spark Structured Streaming | 3.5.6 |
+| OLAP | StarRocks | 3.2.11 |
 | Data lake | Apache Iceberg on MinIO | 1.5.2 |
-| Object storage | MinIO | latest |
-| Orchestration | Apache Airflow | Helm chart |
+| Orchestration | Apache Airflow | Helm |
 | GitOps | ArgoCD | — |
-| In-cluster builds | BuildKit | — |
-| Infrastructure | Terraform (K8s RBAC + ServiceAccounts) | ≥ 1.5 |
-| Backend API | FastAPI + confluent-kafka | Python 3.12 |
-| Dashboard | React 18 + Recharts + nginx | — |
-| Platform | Kubernetes (Hetzner Cloud) | — |
+| Builds | BuildKit (in-cluster) | — |
+| Infra | Terraform | ≥ 1.5 |
+| Backend | FastAPI + confluent-kafka | Python 3.12 |
+| UI | React 18 + Recharts + nginx | — |
+| Platform | Kubernetes on Hetzner Cloud | — |
 
 ---
 
-## Fraud Scoring
+## A few things worth noting
 
-The pipeline runs three independent signal checks per transaction inside a `foreachBatch` handler:
+**Velocity uses processing-time state, not watermarks.** Watermark-based aggregation deflates counts when data arrives late — for a fraud velocity signal you want wall-clock rate, not event-time bucketing. `flatMapGroupsWithState` with `ProcessingTimeTimeout` gives you that.
 
-| Signal | Method | Score Contribution |
-|--------|--------|--------------------|
-| Velocity | `flatMapGroupsWithState` — rolling 5-min transaction count per user | +40 pts if > threshold |
-| Amount anomaly | Z-score against per-user running mean/stddev from StarRocks | +30 pts if z > 3.0 |
-| Geo-speed | Haversine distance between consecutive transactions ÷ elapsed time | +30 pts if > 500 km/h |
+**Both sinks write in the same `foreachBatch` call.** StarRocks (hot path) and Iceberg (cold path, compaction-friendly) are written in the same micro-batch. If either fails the checkpoint doesn't advance — no partial writes, no reconciliation headaches.
 
-Final `fraud_score` ∈ [0, 100]. Transactions scoring ≥ 60 are written to the `fraud-alerts` Redpanda topic and the `fraud.fraud_scores` StarRocks table. All thresholds are environment-variable driven — no hardcoded values.
+**No `kafka.group.id` in the Spark config.** Spark manages its own offset tracking through the checkpoint. Adding an explicit consumer group creates a second offset cursor in Redpanda that diverges from the checkpoint on restart — silent data loss or reprocessing. The field is intentionally absent.
 
----
+**Builds happen inside the cluster.** BuildKit runs as a K8s Deployment. A Job renders the build manifest with `envsubst` (injecting `$GIT_SHA`), builds the image, pushes to GHCR. No local Docker, no external CI. Every image tag is the exact git SHA that produced it — `git commit → image:SHA → SparkApplication manifest → running pod`.
 
-## Data Flow
+**Iceberg uses a JDBC catalog backed by PostgreSQL.** No Hive Metastore. The Airflow PostgreSQL instance doubles as the catalog store via the Iceberg JDBC provider — one less stateful service to operate.
 
-```
-transactions-raw  →  Spark (score)  →  StarRocks fraud.transactions
-                                    →  StarRocks fraud.fraud_scores
-                                    →  Iceberg fraud.transactions (data lake)
-                                    →  Redpanda fraud-alerts (downstream consumers)
-                                    →  Redpanda transactions-clean (validated records)
-                                    →  Redpanda transactions-dlq (malformed records)
-```
-
----
-
-## Key Engineering Decisions
-
-**Stateful velocity without watermarks**
-`flatMapGroupsWithState` with `ProcessingTimeTimeout` rather than watermark-based aggregation. Watermarks deflate velocity counts on delayed data — processing-time state avoids this for a fraud signal that must react to wall-clock rate.
-
-**Dual-sink writes in a single foreachBatch**
-StarRocks (hot path, sub-second query latency) and Iceberg (cold path, compaction-friendly columnar storage) are written atomically in the same micro-batch. A failure in either rolls back the batch via checkpoint — no partial writes.
-
-**Checkpoint fault tolerance**
-Kafka offsets and operator state are checkpointed to `s3a://checkpoints/fraud-stream-v2` on MinIO. On pod restart the stream resumes from the last committed offset — zero data loss, no reprocessing configuration needed.
-
-**No `kafka.group.id`**
-Spark Structured Streaming manages its own offset tracking via the checkpoint. Injecting an explicit consumer group causes offset conflicts on restart — the field is intentionally absent.
-
-**In-cluster image builds**
-BuildKit runs as a Deployment inside the cluster. A K8s Job renders a `buildkit-job.yaml.tpl` via `envsubst`, builds the Docker image, and pushes to GHCR — no local Docker daemon, no CI runner dependency. Every image is tagged with the exact git SHA of the commit that triggered it.
-
-**SHA integrity chain**
-`git commit → GIT_SHA → BuildKit job → image:SHA → envsubst → SparkApplication manifest → running pod`. Every link in the chain carries the same SHA. Rendered manifests are gitignored — the `.tpl` files are the source of truth.
-
-**Iceberg JDBC catalog**
-Iceberg catalog state is stored in PostgreSQL (the Airflow DB) via the JDBC catalog provider — no Hive Metastore dependency, no extra stateful service.
-
-**API key injection at nginx**
-The React dashboard calls the FastAPI backend through an nginx proxy (`/api` prefix). The API key is injected at nginx via `envsubst` into `proxy_set_header X-Api-Key` — the browser never sees the key.
+**The API key never touches the browser.** The React app talks to the backend through an nginx proxy. `envsubst` injects the key into `proxy_set_header X-Api-Key` at container startup — the browser only ever sees the nginx address.
 
 ---
 
 ## Airflow DAGs
 
-| DAG | Schedule | Purpose |
-|-----|----------|---------|
-| `fraud_hourly_reconcile` | Hourly | Compares Redpanda consumer lag vs StarRocks row count — alerts on pipeline drift |
-| `fraud_daily_customer_refresh` | 02:00 daily | Loads customer enrichment CSV from ConfigMap into Iceberg `fraud.customers` |
-| `fraud_feature_refresh` | Configurable | Refreshes risk profile cache used by the geo-speed UDF |
+Three DAGs run on schedule:
 
-DAGs are loaded via `git-sync` from this repo — no DAG files baked into the Airflow image.
+- **`fraud_hourly_reconcile`** — compares Redpanda consumer lag against StarRocks row counts every hour. Catches pipeline drift before it becomes a data quality incident.
+- **`fraud_daily_customer_refresh`** — loads customer enrichment data from a K8s ConfigMap into Iceberg `fraud.customers` at 02:00.
+- **`fraud_feature_refresh`** — refreshes the risk profile cache used by the geo-speed UDF.
+
+DAGs sync from this repo via `git-sync` — nothing baked into the Airflow image.
 
 ---
 
-## Backend API
+## API
 
 ```
-GET  /api/health              — liveness probe, no auth
-POST /api/transaction         — produce transaction to Redpanda (202 Accepted)
-GET  /api/stats               — aggregate metrics for the last hour from StarRocks
-GET  /api/fraud-scores        — recent flagged transactions (default limit 20)
-GET  /api/top-risky-users     — users with highest flag count over 24h
+GET  /api/health              no auth — liveness probe
+POST /api/transaction         produce to Redpanda, returns 202
+GET  /api/stats               1h aggregates from StarRocks
+GET  /api/fraud-scores        recent flagged transactions
+GET  /api/top-risky-users     highest-flag-count users over 24h
 ```
 
-All routes except `/api/health` require `X-Api-Key` header.
+---
+
+## Infrastructure
+
+Terraform runs inside a K8s Job — not from a laptop. It manages RBAC and ServiceAccounts only; namespaces are pre-existing. State lives in MinIO at `s3a://tf-state/fraud-lab/terraform.tfstate`. No credentials in `.tfvars`, no credentials in git.
+
+ArgoCD manages everything under `gitops/bigdata/` — Redpanda, StarRocks, MinIO, Airflow. The SparkApplication is applied imperatively because it depends on a runtime secret (Iceberg DB password from the Airflow PostgreSQL secret) that isn't available at ArgoCD sync time.
 
 ---
 
-## Infrastructure (Terraform)
-
-Terraform runs inside a K8s Job (not locally) and manages only RBAC and ServiceAccounts — it never creates namespaces. State is stored in MinIO (`s3a://tf-state/fraud-lab/terraform.tfstate`). Credentials are injected from K8s secrets at job runtime — never hardcoded, never in `.tfvars` committed to git.
-
----
-
-## GitOps (ArgoCD)
-
-The `gitops/bigdata/` tree is managed by ArgoCD. Redpanda cluster, StarRocks, MinIO jobs, and Airflow values are all declared as ArgoCD Applications — `kubectl apply` is only used for resources that depend on runtime secrets not available at ArgoCD sync time (the SparkApplication manifest, which requires the Iceberg DB password injected from the Airflow PostgreSQL secret).
-
----
-
-## Repository Structure
+## Repo layout
 
 ```
 Huanca/
-├── spark-jobs/                    # Spark application code
-│   ├── fraud_stream_to_starrocks.py   # Main streaming job
-│   ├── customer_csv_to_iceberg.py
-│   ├── init_iceberg_schema.py
-│   └── compact_iceberg.py
-├── k8s-bigdata/spark-fraud-job/   # Spark image Dockerfile + manifest templates
+├── spark-jobs/                     # Spark application code
+│   └── fraud_stream_to_starrocks.py    # main streaming job
+├── k8s-bigdata/spark-fraud-job/    # Dockerfile + manifest templates
 ├── k8s-apps/
-│   ├── backend-api/               # FastAPI backend + BuildKit template
-│   └── fraud-ui/                  # React dashboard + nginx + BuildKit template
-├── dags/                          # Airflow DAGs
-├── gitops/                        # ArgoCD-managed manifests
-│   ├── bigdata/                   # Redpanda, StarRocks, MinIO, Airflow, BuildKit
-│   └── argocd/                    # ArgoCD Application definitions
-└── infra/terraform/               # RBAC, ServiceAccounts
+│   ├── backend-api/                # FastAPI backend
+│   └── fraud-ui/                   # React + nginx
+├── dags/                           # Airflow DAGs
+├── gitops/                         # ArgoCD-managed manifests
+└── infra/terraform/                # RBAC, ServiceAccounts
 ```
-
----
-
-## Security Posture
-
-- All pods run as non-root (`runAsNonRoot: true`), numeric UID enforced at K8s admission
-- Secrets injected exclusively via K8s Secrets — no environment files, no `.tfvars` in git
-- Redpanda inter-broker and client TLS enabled
-- RBAC follows least-privilege: each ServiceAccount (Spark, Airflow, BuildKit) has its own ClusterRole scoped to required resources only
-- API key never exposed to the browser — injected at nginx proxy layer
