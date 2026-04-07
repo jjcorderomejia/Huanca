@@ -1,5 +1,10 @@
 # Huanca — Real-Time Payment Fraud Detection
 
+**Juan Cordero** — Data / Platform Engineer
+[LinkedIn](https://www.linkedin.com/in/juan-cordero-034989112/) · [GitHub](https://github.com/jjcorderomejia) · jjcorderomejia@gmail.com
+
+---
+
 An end-to-end fraud detection pipeline running on Kubernetes. REST endpoint accepts transactions, Spark scores them in real time against velocity, statistical, and geospatial signals, results land in StarRocks for sub-second querying, and a live dashboard shows what's happening now.
 
 **Live dashboard:** http://95.217.112.184
