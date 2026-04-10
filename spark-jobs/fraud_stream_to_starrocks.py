@@ -366,6 +366,8 @@ final_df = (
 # ── WRITE ALL SINKS ───────────────────────────────────────────────────
 def write_all_sinks(batch_df, batch_id: int):
     global acc_total, acc_flagged, acc_geo_hits
+    if batch_df.isEmpty():
+        return
 
     # ── VELOCITY SCORE ────────────────────────────────────────────
     # velocity_5min arrives from _velocity_state_fn (flatMapGroupsWithState).
