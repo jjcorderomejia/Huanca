@@ -208,7 +208,10 @@ spark.sparkContext.setLogLevel("WARN")
 # geo score defaults to 0, no false positives).
 # Background thread loads on first iteration (no sleep before first run),
 # then refreshes every RISK_CACHE_TTL_SEC seconds.
-# Lock prevents race between unpersist and active UDF calls on executors.
+# Lock prevents concurrent swaps of risk_bc on the driver thread.
+# Old broadcast is NOT unpersisted manually — Spark GC handles it once no tasks
+# hold a reference. Explicit unpersist() races with in-flight executor tasks and
+# causes FileNotFoundError on the broadcast block file.
 RISK_CACHE_TTL = int(os.environ.get("RISK_CACHE_TTL_SEC", "60"))
 _risk_lock = threading.Lock()
 
@@ -235,7 +238,6 @@ def refresh_risk_broadcast():
         try:
             new_bc = spark.sparkContext.broadcast(load_risk_profiles())
             with _risk_lock:
-                risk_bc.unpersist()
                 risk_bc = new_bc
             backoff = 60  # reset on success
         except Exception as e:
