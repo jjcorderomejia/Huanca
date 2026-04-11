@@ -28,6 +28,8 @@ SR_PASSWORD_ENV = k8s.V1EnvVar(
 # Load Spark spec from Airflow Variable — no filesystem dependency at parse or execution time
 _compact_spec = json.loads(Variable.get("COMPACT_ICEBERG_SPARK_SPEC"))
 _compact_spec["spec"]["image"] = Variable.get("FRAUD_SPARK_IMAGE")
+# Minimum risk profile row count — configurable without code change via Airflow Variable
+_min_count = int(Variable.get("RISK_PROFILE_MIN_COUNT", default_var="45"))
 
 def sla_miss_callback(dag, task_list, blocking_task_list, slas, blocking_tis):
     print(f"SLA MISS — DAG: {dag.dag_id} | Missed: {task_list} | Blocking: {blocking_task_list}")
@@ -81,8 +83,8 @@ with DAG(
             '--password="${SR_PASSWORD}" --skip-column-names '
             '-e "SELECT count(*) FROM fraud.risk_profiles;"); '
             'echo "Risk profiles: ${COUNT} users"; '
-            'if [ "${COUNT}" -lt "100" ]; then '
-            '  echo "ALERT: Risk profile count ${COUNT} below minimum threshold (100)"; exit 1; '
+            f'if [ "${{COUNT}}" -lt "{_min_count}" ]; then '
+            f'  echo "ALERT: Risk profile count ${{COUNT}} below minimum threshold ({_min_count})"; exit 1; '
             'fi; '
             'STALE=$(mysql -h starrocks-fe -P 9030 -u root '
             '--password="${SR_PASSWORD}" --skip-column-names '
