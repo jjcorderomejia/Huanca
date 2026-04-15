@@ -16,7 +16,6 @@ import json
 import logging
 import os
 import time
-import threading
 from math import radians, sin, cos, sqrt, atan2
 
 from pyspark import StorageLevel
@@ -203,50 +202,36 @@ spark = (
 spark.sparkContext.setLogLevel("WARN")
 
 # ── RISK PROFILE BROADCAST CACHE ──────────────────────────────────────
-# Lazy initialization — driver starts with an empty broadcast so streaming
-# queries begin immediately on cold start (empty risk_profiles is valid:
-# geo score defaults to 0, no false positives).
-# Background thread loads on first iteration (no sleep before first run),
-# then refreshes every RISK_CACHE_TTL_SEC seconds.
-# Lock prevents concurrent swaps of risk_bc on the driver thread.
-# Old broadcast is NOT unpersisted manually — Spark GC handles it once no tasks
-# hold a reference. Explicit unpersist() races with in-flight executor tasks and
-# causes FileNotFoundError on the broadcast block file.
+# TTL-cached inside foreachBatch — refreshed sequentially before each micro-batch.
+# Sequential execution eliminates concurrent Spark job submission that caused
+# executor SIGABRT (exit code 134) with the former background-thread pattern.
+# On cold start cache is empty; geo score defaults to 0 (no false positives).
 RISK_CACHE_TTL = int(os.environ.get("RISK_CACHE_TTL_SEC", "60"))
-_risk_lock = threading.Lock()
-
-def load_risk_profiles():
-    return (
-        spark.read
-        .format("starrocks")
-        .option("starrocks.fenodes", f"{SR_HOST}:8030")
-        .option("starrocks.fe.jdbc.url", f"jdbc:mysql://{SR_HOST}:9030")
-        .option("starrocks.table.identifier", f"{SR_DB}.risk_profiles")
-        .option("starrocks.user", SR_USER)
-        .option("starrocks.password", SR_PASSWORD)
-        .load()
-        .rdd.map(lambda r: (r.user_id, r.asDict()))
-        .collectAsMap()
-    )
+_risk_cache: dict = {"loaded_at": 0.0}
 
 risk_bc = spark.sparkContext.broadcast({})
 
-def refresh_risk_broadcast():
+def refresh_risk_if_stale():
     global risk_bc
-    backoff = 60
-    while True:
-        try:
-            new_bc = spark.sparkContext.broadcast(load_risk_profiles())
-            with _risk_lock:
-                risk_bc = new_bc
-            backoff = 60  # reset on success
-        except Exception as e:
-            logging.error(json.dumps({"event": "risk_refresh_failed", "error": str(e)}))
-            time.sleep(backoff)
-            backoff = min(backoff * 2, 600)  # exponential backoff, cap at 10 min
-        time.sleep(RISK_CACHE_TTL)
-
-threading.Thread(target=refresh_risk_broadcast, daemon=True).start()
+    if (time.time() - _risk_cache["loaded_at"]) < RISK_CACHE_TTL:
+        return
+    try:
+        data = (
+            spark.read
+            .format("starrocks")
+            .option("starrocks.fenodes", f"{SR_HOST}:8030")
+            .option("starrocks.fe.jdbc.url", f"jdbc:mysql://{SR_HOST}:9030")
+            .option("starrocks.table.identifier", f"{SR_DB}.risk_profiles")
+            .option("starrocks.user", SR_USER)
+            .option("starrocks.password", SR_PASSWORD)
+            .load()
+            .rdd.map(lambda r: (r.user_id, r.asDict()))
+            .collectAsMap()
+        )
+        risk_bc = spark.sparkContext.broadcast(data)
+        _risk_cache["loaded_at"] = time.time()
+    except Exception as e:
+        logging.error(json.dumps({"event": "risk_refresh_failed", "error": str(e)}))
 
 # ── CUSTOMER ENRICHMENT CACHE ──────────────────────────────────────────
 # TTL-based in-memory cache. Loaded from iceberg.fraud.customers on MinIO.
@@ -370,6 +355,8 @@ def write_all_sinks(batch_df, batch_id: int):
     global acc_total, acc_flagged, acc_geo_hits
     if batch_df.isEmpty():
         return
+
+    refresh_risk_if_stale()
 
     # ── VELOCITY SCORE ────────────────────────────────────────────
     # velocity_5min arrives from _velocity_state_fn (flatMapGroupsWithState).
