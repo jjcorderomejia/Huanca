@@ -9,10 +9,11 @@ RUN apt-get update && \
     pip3 install --no-cache-dir "pyarrow>=16.0.0,<18.0.0" pandas
 
 # Copy Spark jobs
-COPY fraud_stream_to_starrocks.py /opt/spark/jobs/fraud_stream_to_starrocks.py
-COPY customer_csv_to_iceberg.py   /opt/spark/jobs/customer_csv_to_iceberg.py
-COPY init_iceberg_schema.py       /opt/spark/jobs/init_iceberg_schema.py
-COPY compact_iceberg.py           /opt/spark/jobs/compact_iceberg.py
+COPY fraud_stream_to_starrocks.py      /opt/spark/jobs/fraud_stream_to_starrocks.py
+COPY customer_csv_to_iceberg.py        /opt/spark/jobs/customer_csv_to_iceberg.py
+COPY init_iceberg_schema.py            /opt/spark/jobs/init_iceberg_schema.py
+COPY compact_iceberg.py                /opt/spark/jobs/compact_iceberg.py
+COPY risk_profiles_to_iceberg.py       /opt/spark/jobs/risk_profiles_to_iceberg.py
 
 # StarRocks Spark connector JAR
 ADD https://github.com/StarRocks/starrocks-connector-for-apache-spark/releases/download/v1.1.3/starrocks-spark-connector-3.5_2.12-1.1.3.jar \
