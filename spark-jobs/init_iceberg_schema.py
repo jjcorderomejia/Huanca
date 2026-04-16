@@ -1,10 +1,11 @@
 """
 Iceberg Schema Init Job — run ONCE on initial deploy.
 
-Owns ALL Iceberg DDL. Creates all three tables if they do not exist:
+Owns ALL Iceberg DDL. Creates all four tables if they do not exist:
   - iceberg.fraud.customers         — customer enrichment reference
   - iceberg.fraud.transactions_lake — full audit trail (partitioned by event_time)
   - iceberg.fraud.processed_batches — streaming batch dedup guard
+  - iceberg.fraud.risk_profiles     — risk profile snapshot, synced from StarRocks by Airflow
 
 Run before any other Spark job. Safe to re-run (CREATE TABLE IF NOT EXISTS).
 """
@@ -70,5 +71,20 @@ spark.sql("""
     USING iceberg
 """)
 print("✅ iceberg.fraud.processed_batches ready")
+
+# ── RISK PROFILES — snapshot synced from StarRocks by Airflow ─────────
+spark.sql("""
+    CREATE TABLE IF NOT EXISTS iceberg.fraud.risk_profiles (
+        user_id           STRING,
+        avg_amount_30d    DOUBLE,
+        stddev_amount     DOUBLE,
+        avg_velocity_1h   DOUBLE,
+        last_merchant_lat DOUBLE,
+        last_merchant_lon DOUBLE,
+        updated_at        TIMESTAMP
+    )
+    USING iceberg
+""")
+print("✅ iceberg.fraud.risk_profiles ready")
 
 spark.stop()

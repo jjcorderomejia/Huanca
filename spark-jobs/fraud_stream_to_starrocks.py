@@ -218,13 +218,8 @@ def refresh_risk_if_stale():
     try:
         data = (
             spark.read
-            .format("starrocks")
-            .option("starrocks.fenodes", f"{SR_HOST}:8030")
-            .option("starrocks.fe.jdbc.url", f"jdbc:mysql://{SR_HOST}:9030")
-            .option("starrocks.table.identifier", f"{SR_DB}.risk_profiles")
-            .option("starrocks.user", SR_USER)
-            .option("starrocks.password", SR_PASSWORD)
-            .load()
+            .format("iceberg")
+            .load("iceberg.fraud.risk_profiles")
             .rdd.map(lambda r: (r.user_id, r.asDict()))
             .collectAsMap()
         )

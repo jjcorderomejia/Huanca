@@ -28,6 +28,8 @@ SR_PASSWORD_ENV = k8s.V1EnvVar(
 # Load Spark spec from Airflow Variable — no filesystem dependency at parse or execution time
 _compact_spec = json.loads(Variable.get("COMPACT_ICEBERG_SPARK_SPEC"))
 _compact_spec["spec"]["image"] = Variable.get("FRAUD_SPARK_IMAGE")
+_risk_sync_spec = json.loads(Variable.get("RISK_SYNC_ICEBERG_SPARK_SPEC"))
+_risk_sync_spec["spec"]["image"] = Variable.get("FRAUD_SPARK_IMAGE")
 # Minimum risk profile row count — configurable without code change via Airflow Variable
 _min_count = int(Variable.get("RISK_PROFILE_MIN_COUNT", default_var="45"))
 
@@ -106,6 +108,15 @@ with DAG(
         sla=timedelta(hours=1, minutes=15),
     )
 
+    sync_risk_profiles_iceberg = SparkKubernetesOperator(
+        task_id="sync_risk_profiles_iceberg",
+        namespace="bigdata",
+        application_file=json.dumps(_risk_sync_spec),
+        kubernetes_conn_id="kubernetes_default",
+        do_xcom_push=False,
+        sla=timedelta(minutes=30),
+    )
+
     compact_iceberg = SparkKubernetesOperator(
         task_id="compact_iceberg_tables",
         namespace="bigdata",
@@ -115,4 +126,4 @@ with DAG(
         sla=timedelta(hours=2),
     )
 
-    refresh_risk_profiles >> verify_risk_profiles >> compact_iceberg
+    refresh_risk_profiles >> verify_risk_profiles >> sync_risk_profiles_iceberg >> compact_iceberg
