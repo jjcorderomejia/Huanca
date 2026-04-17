@@ -38,7 +38,7 @@ with DAG(
             'LAG=$(rpk group describe fraud-stream-consumer '
             '--brokers fraud-redpanda-0.fraud-redpanda.bigdata.svc.cluster.local:9092 '
             '-X tls.enabled=true -X tls.insecure_skip_verify=true '
-            '| grep transactions-raw | awk \'{sum+=$NF} END {print sum+0}\'); '
+            '| { grep transactions-raw || true; } | awk \'{sum+=$NF} END {print sum+0}\'); '
             'echo "Consumer lag: ${LAG}"; '
             'if [ "${LAG}" -gt "10000" ]; then '
             '  echo "ALERT: Consumer lag ${LAG} exceeds threshold (10000)"; exit 1; '
