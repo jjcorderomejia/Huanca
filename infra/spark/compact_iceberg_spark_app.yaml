@@ -37,7 +37,7 @@ spec:
   executor:
     cores: 2
     instances: 2
-    memory: "2g"
+    memory: "4g"
     env:
       - name: MINIO_ACCESS_KEY
         valueFrom:
