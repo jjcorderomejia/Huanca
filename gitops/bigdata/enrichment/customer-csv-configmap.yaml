@@ -6,8 +6,8 @@ metadata:
 data:
   customer.csv: |
     user_id,plan,avg_amount_30d,credit_limit
-    user-001,PREMIUM,150.00,5000.00
-    user-002,BASIC,45.00,1000.00
-    user-003,PREPAID,25.00,500.00
-    user-004,PREMIUM,300.00,10000.00
-    user-005,BASIC,80.00,2000.00
+    user_000,PREMIUM,97.01,5000.00
+    user_001,BASIC,209.48,2000.00
+    user_002,PREPAID,138.14,500.00
+    user_003,BASIC,161.5,2000.00
+    user_004,PREMIUM,201.97,5000.00
