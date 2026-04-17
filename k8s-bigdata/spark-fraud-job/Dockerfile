@@ -20,7 +20,7 @@ ADD https://github.com/StarRocks/starrocks-connector-for-apache-spark/releases/d
     /opt/spark/jars/starrocks-spark-connector.jar
 
 # Iceberg + S3A JARs
-ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.5.2/iceberg-spark-runtime-3.5_2.12-1.5.2.jar \
+ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.7.2/iceberg-spark-runtime-3.5_2.12-1.7.2.jar \
     /opt/spark/jars/iceberg-spark-runtime.jar
 
 ADD https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar \
