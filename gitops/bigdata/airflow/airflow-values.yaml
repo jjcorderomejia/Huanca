@@ -73,6 +73,7 @@ dags:
     enabled: true
     repo: https://github.com/jjcorderomejia/Huanca.git
     branch: main
+    ref: main
     subPath: dags
     credentialsSecret: airflow-git-token-secret
     period: 60s
