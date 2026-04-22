@@ -32,7 +32,7 @@ terraform -chdir=infra/terraform apply -var="ghcr_token=<token>"
 There is a master document: `docs/FRAUD_LAB_COMPLETE_V9.md`. It is the single source of truth.
 
 1. Before running any command, find it in the doc first. If it is not in the doc, stop and ask.
-2. Always run `source $HOST_HOME/.lab_Huanca` at the start of every session before any command. This sets all required env vars (`GIT_SHA`, `REPO_ROOT`, `ORG`, etc.) and git identity (`user.email`, `user.name`). Never run `git config` manually — it is handled here.
+2. Always `source $HOST_HOME/.lab_Huanca` before any command. Each Bash tool call is a new shell — chain it at the start of every shell block: `source $HOST_HOME/.lab_Huanca && <command>`. This sets all required env vars (`GIT_SHA`, `REPO_ROOT`, `ORG`, etc.) and git identity. Never run `git config` manually — it is handled here.
 3. Never run ad-hoc commands. Never chain with `&&` unless the doc does.
 4. Never directly edit `.tpl` or `.py` files. Always regenerate from the doc's `cat >` heredoc.
 5. When a file needs updating: (1) update doc first, (2) find the doc's heredoc that writes the file, (3) run that heredoc to regenerate the file on disk, (4) commit.
@@ -41,10 +41,8 @@ There is a master document: `docs/FRAUD_LAB_COMPLETE_V9.md`. It is the single so
 8. Never push `docs/` to git.
 9. Always show the user the doc's line numbers that will be modified before making any change.
 10. Always show the user the line numbers in `docs/FRAUD_LAB_COMPLETE_V9.md` that match the proposed changes before executing anything.
-11. Each Bash tool call is a new shell — environment variables do not persist between calls.
-12. `source $HOST_HOME/.lab_Huanca` must be chained at the start of every individual shell block: `source $HOST_HOME/.lab_Huanca && <command>`. Running it once in a prior call has no effect on subsequent calls.
-13. When a blocking operation (wait, poll, build) shows no progress for 2 minutes, do not terminate it. Open a parallel diagnostic — describe the resource, check logs — and report findings before taking any action.
-14. `**/_rendered/` — rendered manifests containing image SHAs; never commit.
-15. Build context copies (files staged into Docker build directories) stay out of git — never commit or stage them.
-16. `**/*.tfstate`, `**/.terraform/`, `**/*.tfvars` — Terraform state and local plugin cache; state lives in MinIO; never commit.
-17. `*.env`, `*secret*`, `*credentials*` — all secret/env files; never commit.
+11. When a blocking operation (wait, poll, build) stalls for 2 minutes, leave it running and open a parallel diagnostic: describe the resource, check logs, report findings — do not act until root cause is clear.
+12. Never commit `**/_rendered/` — rendered manifests contain image SHAs and are generated at deploy time.
+13. Never commit or stage build context copies — files copied into Docker build directories are ephemeral.
+14. Never commit `**/*.tfstate`, `**/.terraform/`, or `**/*.tfvars` — Terraform state lives in MinIO; local plugin cache and var files stay local.
+15. Never commit `*.env`, `*secret*`, or `*credentials*` files.
