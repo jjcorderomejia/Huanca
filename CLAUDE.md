@@ -29,17 +29,17 @@ terraform -chdir=infra/terraform apply -var="ghcr_token=<token>"
 
 ## Working rules — strict
 
-There is a master document: `docs/FRAUD_LAB_COMPLETE_V9.md`. It is the single source of truth.
+There is a runbook: `docs/FRAUD_LAB_COMPLETE_V9.md`. It is the single source of truth.
 
-1. Before running any command, find it in the doc first. If it is not in the doc, stop and ask.
+1. Before running any command, find it in the runbook first. If it is not in the runbook, stop and ask.
 2. Always `source $HOST_HOME/.lab_Huanca` before any command. Each Bash tool call is a new shell — chain it at the start of every shell block: `source $HOST_HOME/.lab_Huanca && <command>`. This sets all required env vars (`GIT_SHA`, `REPO_ROOT`, `ORG`, etc.) and git identity. Never run `git config` manually — it is handled here.
-3. Never run ad-hoc commands. Never chain with `&&` unless the doc does.
-4. Never directly edit `.tpl` or `.py` files. Always regenerate from the doc's `cat >` heredoc.
-5. When a file needs updating: (1) update doc first, (2) find the doc's heredoc that writes the file, (3) run that heredoc to regenerate the file on disk, (4) commit.
-6. Only stage files that actually changed — not all files listed in a doc `git add`.
-7. Commit message: use the doc's exact message only for first-deploy commits where the doc defines one. For any subsequent fix or modification, generate a descriptive commit message at commit time — no doc update required.
+3. Never run ad-hoc commands. Never chain with `&&` unless the runbook does.
+4. Never directly edit `.tpl` or `.py` files. Always regenerate from the runbook's `cat >` heredoc.
+5. When a file needs updating: (1) update runbook first, (2) find the runbook's heredoc that writes the file, (3) run that heredoc to regenerate the file on disk, (4) commit.
+6. Only stage files that actually changed — not all files listed in a runbook `git add`.
+7. Commit message: use the runbook's exact message only for first-deploy commits where the runbook defines one. For any subsequent fix or modification, generate a descriptive commit message at commit time — no runbook update required.
 8. Never push `docs/` to git.
-9. Always show the user the doc's line numbers that will be modified before making any change.
+9. Always show the user the runbook's line numbers that will be modified before making any change.
 10. Always show the user the line numbers in `docs/FRAUD_LAB_COMPLETE_V9.md` that match the proposed changes before executing anything.
 11. When a blocking operation (wait, poll, build) stalls for 2 minutes, leave it running and open a parallel diagnostic: describe the resource, check logs, report findings — do not act until root cause is clear.
 12. Never commit `**/_rendered/` — rendered manifests contain image SHAs and are generated at deploy time.
