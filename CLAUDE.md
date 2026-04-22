@@ -31,16 +31,16 @@ terraform -chdir=infra/terraform apply -var="ghcr_token=<token>"
 
 There is a master document: `docs/FRAUD_LAB_COMPLETE_V9.md`. It is the single source of truth.
 
-- Before running any command, find it in the doc first. If it is not in the doc, stop and ask.
-- Never run ad-hoc commands. Never chain with `&&` unless the doc does.
-  - Always run `source $HOST_HOME/.lab_Huanca` at the start of every session before any command. This sets all required env vars (`GIT_SHA`, `REPO_ROOT`, `ORG`, etc.) and git identity (`user.email`, `user.name`). Never run `git config` manually — it is handled here.
-- Never directly edit `.tpl` or `.py` files. Always regenerate from the doc's `cat >` heredoc.
-- When a file needs updating: (1) update doc first, (2) find the doc's heredoc that writes the file, (3) run that heredoc to regenerate the file on disk, (4) commit.
-- Only stage files that actually changed — not all files listed in a doc `git add`.
-- Commit message: use the doc's exact message only for first-deploy commits where the doc defines one. For any subsequent fix or modification, generate a descriptive commit message at commit time — no doc update required.
-- Never push `docs/` to git.
-- Always show the user the doc's line numbers that will be modified before making any change.
-- Always show the user the line numbers in `docs/FRAUD_LAB_COMPLETE_V9.md` that match the proposed changes before executing anything.
+1. Before running any command, find it in the doc first. If it is not in the doc, stop and ask.
+2. Always run `source $HOST_HOME/.lab_Huanca` at the start of every session before any command. This sets all required env vars (`GIT_SHA`, `REPO_ROOT`, `ORG`, etc.) and git identity (`user.email`, `user.name`). Never run `git config` manually — it is handled here.
+3. Never run ad-hoc commands. Never chain with `&&` unless the doc does.
+4. Never directly edit `.tpl` or `.py` files. Always regenerate from the doc's `cat >` heredoc.
+5. When a file needs updating: (1) update doc first, (2) find the doc's heredoc that writes the file, (3) run that heredoc to regenerate the file on disk, (4) commit.
+6. Only stage files that actually changed — not all files listed in a doc `git add`.
+7. Commit message: use the doc's exact message only for first-deploy commits where the doc defines one. For any subsequent fix or modification, generate a descriptive commit message at commit time — no doc update required.
+8. Never push `docs/` to git.
+9. Always show the user the doc's line numbers that will be modified before making any change.
+10. Always show the user the line numbers in `docs/FRAUD_LAB_COMPLETE_V9.md` that match the proposed changes before executing anything.
 
 ## Shell execution model
 - Each Bash tool call is a new shell — environment variables do not persist between calls.
