@@ -20,9 +20,23 @@ ICEBERG_DB_PASS   = os.environ["ICEBERG_DB_PASSWORD"]
 spark = (
     SparkSession.builder
     .appName("customer-csv-to-iceberg")
+    .config("spark.sql.extensions",
+            "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
+    .config("spark.sql.catalog.iceberg",
+            "org.apache.iceberg.spark.SparkCatalog")
+    .config("spark.sql.catalog.iceberg.type", "jdbc")
+    .config("spark.sql.catalog.iceberg.uri",
+            "jdbc:postgresql://airflow-postgresql.bigdata.svc.cluster.local:5432/iceberg_catalog")
+    .config("spark.sql.catalog.iceberg.jdbc.user", "postgres")
+    .config("spark.sql.catalog.iceberg.jdbc.password", ICEBERG_DB_PASS)
+    .config("spark.sql.catalog.iceberg.warehouse", "s3a://iceberg/warehouse")
+    .config("spark.hadoop.fs.s3a.endpoint",
+            "http://minio.bigdata.svc.cluster.local:9000")
     .config("spark.hadoop.fs.s3a.access.key", MINIO_ACCESS_KEY)
     .config("spark.hadoop.fs.s3a.secret.key", MINIO_SECRET_KEY)
-    .config("spark.sql.catalog.iceberg.jdbc.password", ICEBERG_DB_PASS)
+    .config("spark.hadoop.fs.s3a.path.style.access", "true")
+    .config("spark.hadoop.fs.s3a.impl",
+            "org.apache.hadoop.fs.s3a.S3AFileSystem")
     .getOrCreate()
 )
 spark.sparkContext.setLogLevel("WARN")
