@@ -1,31 +1,8 @@
-# CLAUDE.md
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
 **Huanca** is a Kubernetes-native real-time payment fraud detection lab (in progress).
 
 Stack: Redpanda | Spark Structured Streaming | StarRocks | Apache Iceberg | MinIO | Airflow | ArgoCD | BuildKit | Terraform
-
-## Infrastructure — Terraform (`infra/terraform/`)
-
-Terraform runs **inside a Kubernetes Job** (not locally). It targets an existing K8s cluster and manages only RBAC/ServiceAccounts — it never creates namespaces (those are pre-existing: `bigdata`, `apps`, `argocd`, `spark-operator`).
-
-**Backend**: S3-compatible via MinIO at `minio.bigdata.svc.cluster.local:9000`, bucket `tf-state`, key `fraud-lab/terraform.tfstate`. Credentials come from env vars `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` injected from the `minio-secret` K8s secret — never hardcoded.
-
-**Variables**: `ghcr_token` (sensitive, required) and `ghcr_user` are passed at plan/apply time. `.tfvars` files are gitignored and must never be committed.
-
-### Common Terraform commands
-
-```bash
-# Init (run from inside the K8s Job context, or with KUBECONFIG set)
-terraform -chdir=infra/terraform init
-
-# Plan / Apply
-terraform -chdir=infra/terraform plan -var="ghcr_token=<token>"
-terraform -chdir=infra/terraform apply -var="ghcr_token=<token>"
-```
 
 ## Session startup — required
 
