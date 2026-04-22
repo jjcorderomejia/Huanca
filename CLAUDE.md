@@ -27,6 +27,14 @@ terraform -chdir=infra/terraform plan -var="ghcr_token=<token>"
 terraform -chdir=infra/terraform apply -var="ghcr_token=<token>"
 ```
 
+## Session startup — required
+
+At the start of every session, before responding to the user:
+1. Find the most recent `.jsonl` file in `~/.claude/projects/-home-jjcm-Huanca/`
+2. Read the last messages and any `away_summary` directly from the file — do not use memory files as a substitute
+3. If there is pending work or unresolved state: show the user a brief summary before doing anything else
+4. If nothing is pending: proceed normally without mentioning the check
+
 ## Working rules — strict
 
 There is a runbook: `docs/FRAUD_LAB_COMPLETE_V9.md`. It is the single source of truth.
@@ -46,4 +54,3 @@ There is a runbook: `docs/FRAUD_LAB_COMPLETE_V9.md`. It is the single source of 
 13. Never commit or stage build context copies — files copied into Docker build directories are ephemeral.
 14. Never commit `**/*.tfstate`, `**/.terraform/`, or `**/*.tfvars` — Terraform state lives in MinIO; local plugin cache and var files stay local.
 15. Never commit `*.env`, `*secret*`, or `*credentials*` files.
-16. At session start, silently find the most recent `.jsonl` file in `~/.claude/projects/-home-jjcm-Huanca/`, read the last messages and any `away_summary` directly from the file — do not rely on memory files as a substitute. If there is pending work or unresolved state, show the user a brief summary before doing anything else. If nothing is pending, proceed normally without mentioning the check.
