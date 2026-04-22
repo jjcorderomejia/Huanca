@@ -29,11 +29,13 @@ terraform -chdir=infra/terraform apply -var="ghcr_token=<token>"
 
 ## Session startup — required
 
-At the start of every session, before responding to the user:
-1. Find the most recent `.jsonl` file in `~/.claude/projects/-home-jjcm-Huanca/`
-2. Read the last messages and any `away_summary` directly from the file — do not use memory files as a substitute
-3. If there is pending work or unresolved state: show the user a brief summary before doing anything else
-4. If nothing is pending: proceed normally without mentioning the check
+At the start of every session, before responding to the user, run this exact command:
+
+```bash
+tail -c 8000 $(ls -t ~/.claude/projects/-home-jjcm-Huanca/*.jsonl | head -1)
+```
+
+Parse the output for `away_summary` and last user/assistant messages. Do not use memory files as a substitute. If there is pending work or unresolved state, show the user a brief summary. If nothing is pending, proceed normally without mentioning the check.
 
 ## Working rules — strict
 
