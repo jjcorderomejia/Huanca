@@ -42,8 +42,16 @@ There is a master document: `docs/FRAUD_LAB_COMPLETE_V9.md`. It is the single so
 - Always show the user the doc's line numbers that will be modified before making any change.
 - Always show the user the line numbers in `docs/FRAUD_LAB_COMPLETE_V9.md` that match the proposed changes before executing anything.
 
+## Shell execution model
+- Each Bash tool call is a new shell — environment variables do not persist between calls.
+- `source $HOST_HOME/.lab_Huanca` must be chained at the start of every individual shell block: `source $HOST_HOME/.lab_Huanca && <command>`. Running it once in a prior call has no effect on subsequent calls.
+
+## Long-running operations
+- When a blocking operation (wait, poll, build) shows no progress for 2 minutes, do not terminate it. Open a parallel diagnostic — describe the resource, check logs — and report findings before taking any action.
+
 ## Key `.gitignore` rules
 
 - `**/_rendered/` — rendered manifests containing image SHAs; never commit
+- Build context copies (files staged into Docker build directories) stay out of git — never commit or stage them
 - `**/*.tfstate`, `**/.terraform/`, `**/*.tfvars` — Terraform state and local plugin cache; state lives in MinIO
 - `*.env`, `*secret*`, `*credentials*` — all secret/env files
