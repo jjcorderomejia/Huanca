@@ -32,7 +32,7 @@ spec:
                   name: api-key-secret
                   key: api-key
             - name: TXN_RATE
-              value: "2.0"
+              value: "6.0"
             - name: BACKOFF_MAX
               value: "60"
           resources:

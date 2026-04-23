@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
 # ── CONFIG ─────────────────────────────────────────────────────────────
 BACKEND_URL  = os.environ.get("BACKEND_URL",  "http://backend-api.apps.svc.cluster.local:8000")
 API_KEY      = os.environ.get("API_KEY",      "")
-TXN_RATE     = float(os.environ.get("TXN_RATE", "2.0"))   # avg transactions per minute
+TXN_RATE     = float(os.environ.get("TXN_RATE", "6.0"))   # avg transactions per minute
 BACKOFF_MAX  = int(os.environ.get("BACKOFF_MAX", "60"))    # max backoff seconds
 
 HEADERS = {"X-Api-Key": API_KEY, "Content-Type": "application/json"}
@@ -85,17 +85,18 @@ def near(lat, lon, radius_deg=0.3):
 
 def far(lat, lon):
     """Return a location physically impossible to reach in < 5 min (geo-speed fraud)."""
-    # Pick a random distant city — at least 1000km away
     candidates = [(c[1], c[2]) for c in CITIES if haversine_km(lat, lon, c[1], c[2]) > 1000]
     if not candidates:
         candidates = [(CITIES[0][1], CITIES[0][2])]
     base = random.choice(candidates)
     return near(base[0], base[1], 0.1)
 
-def make_transaction(user: dict, fraud_type: str = None) -> dict:
-    merchant_id  = random.choice(MERCHANTS)
-    base_amount  = user["avg_spend"]
-
+def make_transaction(user, fraud_type=None):
+    merchant_id = random.choice(MERCHANTS)
+    if random.random() < 0.005:
+        legacy_id = f"merchant-legacy-{random.randint(1,50):04d}"
+        merchant_id = legacy_id
+    base_amount = user["avg_spend"]
     if fraud_type == "amount":
         amount = round(base_amount * random.uniform(8.0, 15.0), 2)
         lat, lon = near(user["home_lat"], user["home_lon"])
@@ -105,7 +106,6 @@ def make_transaction(user: dict, fraud_type: str = None) -> dict:
     else:
         amount = round(base_amount * random.uniform(0.3, 2.0), 2)
         lat, lon = near(user["home_lat"], user["home_lon"])
-
     return {
         "user_id":      user["user_id"],
         "amount":       max(1.0, amount),
@@ -135,15 +135,11 @@ def post_transaction(payload: dict) -> bool:
         log.error('"event":"txn_error","error":"%s"', str(e))
         return False
 
-# ── MAIN LOOP ──────────────────────────────────────────────────────────
 def main():
     backoff = 1
     log.info('"event":"generator_start","rate_per_min":%.1f,"users":%d', TXN_RATE, len(USERS))
-
     while True:
         user = random.choice(USERS)
-
-        # 10% fraud pattern
         r = random.random()
         if r < 0.04:
             fraud_type = "geo"
@@ -153,9 +149,7 @@ def main():
             fraud_type = "velocity"
         else:
             fraud_type = None
-
         if fraud_type == "velocity":
-            # Burst: 6 transactions in rapid succession for this user
             for _ in range(6):
                 payload = make_transaction(user)
                 ok = post_transaction(payload)
@@ -175,13 +169,9 @@ def main():
                 continue
             else:
                 backoff = 1
-
-        # Update user last location
         user["last_lat"]  = payload.get("merchant_lat")
         user["last_lon"]  = payload.get("merchant_lon")
         user["last_time"] = time.time()
-
-        # Poisson inter-arrival: exponential distribution with mean = 60/TXN_RATE seconds
         sleep_s = random.expovariate(TXN_RATE / 60.0)
         time.sleep(sleep_s)
 
