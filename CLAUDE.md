@@ -24,3 +24,8 @@ There is a runbook: `docs/FRAUD_LAB_COMPLETE_V9.md`. It is the single source of 
 14. Never commit `**/*.tfstate`, `**/.terraform/`, or `**/*.tfvars` — Terraform state lives in MinIO; local plugin cache and var files stay local.
 15. Never commit `*.env`, `*secret*`, or `*credentials*` files.
 16. Never add "Co-Authored-By" or similar attribution lines to commit messages.
+17. Runbook command execution procedure:
+    a. In the Bash tool's `description` field, render the code exactly as it appears in the runbook with line numbers on the left side.
+    b. In my text, only write the line range reference (e.g., "Lines XX-XX"). No separate code block.
+    c. Do not ask for confirmation — the system's tool use permission prompt ("Do you want to proceed? ❯ Yes / No") is the only confirmation.
+    d. The actual `command` field may use `&&` chaining for shell compatibility, but the `description` must show the runbook's original formatting.
