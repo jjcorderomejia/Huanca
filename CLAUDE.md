@@ -23,3 +23,4 @@ There is a runbook: `docs/FRAUD_LAB_COMPLETE_V9.md`. It is the single source of 
 13. Never commit or stage build context copies — files copied into Docker build directories are ephemeral.
 14. Never commit `**/*.tfstate`, `**/.terraform/`, or `**/*.tfvars` — Terraform state lives in MinIO; local plugin cache and var files stay local.
 15. Never commit `*.env`, `*secret*`, or `*credentials*` files.
+16. Never add "Co-Authored-By" or similar attribution lines to commit messages.
