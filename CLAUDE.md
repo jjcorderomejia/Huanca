@@ -10,7 +10,7 @@ There is a runbook: `/home/jjcm/runbooks/huanca/FRAUD_LAB_COMPLETE_V9.md` (clone
 The runbooks repo lives at `/home/jjcm/runbooks/` — edit there, commit there, push there.
 
 1. Before running any command, find it in the runbook first. If it is not in the runbook, stop and ask.
-2. Always `source $HOST_HOME/.lab_Huanca` before any command. Each Bash tool call is a new shell — chain it at the start of every shell block: `source $HOST_HOME/.lab_Huanca && <command>`. This sets all required env vars (`GIT_SHA`, `REPO_ROOT`, `ORG`, etc.) and git identity. Never run `git config` manually — it is handled here.
+2. Always `source ${HOST_HOME:-$HOME}/.lab_Huanca` before any command. Each Bash tool call is a new shell — chain it at the start of every shell block: `source ${HOST_HOME:-$HOME}/.lab_Huanca && <command>`. This sets all required env vars (`GIT_SHA`, `REPO_ROOT`, `ORG`, etc.) and git identity. Never run `git config` manually — it is handled here.
 3. Never run ad-hoc commands. Never chain with `&&` unless the runbook does.
 4. Never directly edit `.tpl` or `.py` files. Always regenerate from the runbook's `cat >` heredoc.
 5. When a file needs updating: (1) update runbook in `/home/jjcm/runbooks/` first and commit it, (2) find the runbook's heredoc that writes the file, (3) run that heredoc to regenerate the file on disk, (4) commit the regenerated file in the project repo.
