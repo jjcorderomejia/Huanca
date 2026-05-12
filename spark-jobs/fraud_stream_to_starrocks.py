@@ -533,6 +533,8 @@ def write_all_sinks(batch_df, batch_id: int):
                     "ingest_time", "fraud_score", "is_flagged", "reasons"
                 )
                 .write.format("iceberg")
+                .option("write.metadata.delete-after-commit.enabled", "true")
+                .option("write.metadata.previous-versions-max", "10")
                 .mode("append")
                 .save("iceberg.fraud.transactions_lake")
             )
@@ -586,6 +588,8 @@ def write_all_sinks(batch_df, batch_id: int):
                     spark.createDataFrame([(batch_id,)], ["batch_id"])
                     .withColumn("processed_at", current_timestamp())
                     .write.format("iceberg")
+                    .option("write.metadata.delete-after-commit.enabled", "true")
+                    .option("write.metadata.previous-versions-max", "10")
                     .mode("append")
                     .save("iceberg.fraud.processed_batches")
                 )
