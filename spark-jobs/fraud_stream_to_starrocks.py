@@ -37,6 +37,7 @@ TOPIC_IN                = os.environ.get("TOPIC_IN",                "transaction
 TOPIC_DLQ               = os.environ.get("TOPIC_DLQ",               "transactions-dlq")
 TOPIC_CLEAN             = os.environ.get("TOPIC_CLEAN",             "transactions-clean")
 TOPIC_ALERTS            = os.environ.get("TOPIC_ALERTS",            "fraud-alerts")
+TOPIC_SCORED            = os.environ.get("TOPIC_SCORED",            "transactions-scored")
 SR_HOST                 = os.environ.get("STARROCKS_HOST",           "starrocks-fe-svc.bigdata.svc.cluster.local")
 SR_PORT                 = os.environ.get("STARROCKS_PORT",           "9030")
 SR_DB                   = os.environ.get("STARROCKS_DB",             "fraud")
@@ -50,7 +51,6 @@ CUSTOMER_CACHE_TTL      = int(os.environ.get("CUSTOMER_CACHE_TTL_SEC", "3600")) 
 STARTING_OFFSETS        = os.environ.get("STARTING_OFFSETS",         "earliest")  # safe default — no gap on checkpoint loss
 CHECKPOINT_BASE         = os.environ.get("CHECKPOINT_LOCATION",      "s3a://checkpoints/fraud-stream")
 TRIGGER_INTERVAL        = os.environ.get("SPARK_TRIGGER_INTERVAL",   "10 seconds")
-COLD_TRIGGER_INTERVAL   = os.environ.get("SPARK_COLD_TRIGGER_INTERVAL", "5 minutes")
 MAX_OFFSETS_PER_TRIGGER = int(os.environ.get("MAX_OFFSETS_PER_TRIGGER", "50000"))  # cap batch size — prevent OOM on backlog
 
 # ── FRAUD THRESHOLDS (overridable via env) ────────────────────────────
@@ -565,6 +565,27 @@ def write_hot_sinks(batch_df, batch_id: int):
         except Exception as e:
             logging.error(json.dumps({"event": "sink_failed", "sink": "kafka_clean", "batch_id": batch_id, "error": str(e)}))
 
+        # ── KAFKA — scored stream (durable log; consumed by iceberg-writer) ──
+        try:
+            (
+                batch_df.select(
+                    col("transaction_id").cast("string").alias("key"),
+                    to_json(struct(
+                        "transaction_id", "user_id", "amount", "merchant_id",
+                        "merchant_lat", "merchant_lon", "status", "event_time",
+                        "ingest_time", "fraud_score", "is_flagged", "reasons",
+                        "k_topic", "k_partition", "k_offset"
+                    )).alias("value")
+                )
+                .write.format("kafka")
+                .option("kafka.bootstrap.servers", BOOTSTRAP)
+                .option("topic", TOPIC_SCORED)
+                .options(**_KAFKA_SSL)
+                .save()
+            )
+        except Exception as e:
+            logging.error(json.dumps({"event": "sink_failed", "sink": "kafka_scored", "batch_id": batch_id, "error": str(e)}))
+
         # ── STRUCTURED LOG ────────────────────────────────────────
         logging.warning(json.dumps({
             "batch_id":      batch_id,
@@ -578,108 +599,6 @@ def write_hot_sinks(batch_df, batch_id: int):
 
     finally:
         batch_df.unpersist()
-
-# ── COLD SINKS — Iceberg (5min trigger, MERGE exactly-once) ──────────────
-def write_cold_sinks(batch_df, batch_id: int):
-    """Iceberg cold path — MERGE on (k_topic, k_partition, k_offset) ensures
-    exactly-once across crash/replay. expire_snapshots(retain_last=1) keeps
-    metadata at KiB-scale steady-state."""
-    if batch_df.isEmpty():
-        return
-
-    # ── VELOCITY SCORE ────────────────────────────────────────────
-    batch_df = batch_df.withColumn("score_velocity",
-        when(col("velocity_5min") > VELOCITY_THRESHOLD, lit(40)).otherwise(lit(0)))
-
-    # ── CUSTOMER ENRICHMENT ───────────────────────────────────────
-    customers_df = get_customers_df()
-    batch_df = (
-        batch_df
-        .join(broadcast(customers_df), batch_df.user_id == customers_df.c_user_id, "left")
-        .drop("c_user_id")
-        .withColumn("plan",
-            when(col("plan").isNull(), lit("unknown")).otherwise(col("plan")))
-        .withColumn("avg_amount_30d",
-            when(col("avg_amount_30d").isNull(), lit(0.0)).otherwise(col("avg_amount_30d")))
-    )
-
-    # ── ZSCORE ────────────────────────────────────────────────────
-    batch_df = (
-        batch_df
-        .withColumn("amount_zscore",
-            when(col("avg_amount_30d") > 0,
-                (col("amount") - col("avg_amount_30d")) / (col("avg_amount_30d") * 0.3))
-            .otherwise(lit(0.0)))
-        .withColumn("score_zscore",
-            when(col("amount_zscore") > ZSCORE_THRESHOLD, lit(30)).otherwise(lit(0)))
-    )
-
-    # ── GEO ENRICHMENT ────────────────────────────────────────────
-    refresh_risk_if_stale()
-    batch_df = (
-        batch_df
-        .withColumn("geo_speed_kmh",
-            compute_geo_udf(
-                col("user_id"), col("merchant_lat"),
-                col("merchant_lon"), col("event_time")
-            ))
-        .withColumn("score_geo",
-            when(col("geo_speed_kmh") > GEO_SPEED_THRESHOLD, lit(30)).otherwise(lit(0)))
-    )
-
-    # ── FINAL SCORE ───────────────────────────────────────────────
-    batch_df = (
-        batch_df
-        .withColumn("fraud_score",
-            col("score_velocity") + col("score_zscore") + col("score_geo"))
-        .withColumn("is_flagged", col("fraud_score") >= FRAUD_SCORE_CUTOFF)
-        .withColumn("reasons", expr("""
-            concat_ws(',',
-              case when score_velocity > 0 then 'HIGH_VELOCITY' end,
-              case when score_zscore   > 0 then 'AMOUNT_ANOMALY' end,
-              case when score_geo      > 0 then 'GEO_IMPOSSIBLE' end
-            )
-        """))
-        .persist(StorageLevel.MEMORY_AND_DISK)
-    )
-
-    # ── MERGE transactions_lake (exactly-once by Kafka offsets) ──
-    batch_df.createOrReplaceTempView("_batch")
-    try:
-        spark.sql("""
-            MERGE INTO iceberg.fraud.transactions_lake AS t
-            USING _batch AS s
-            ON  t.k_topic     = s.k_topic
-            AND t.k_partition = s.k_partition
-            AND t.k_offset    = s.k_offset
-            WHEN NOT MATCHED THEN INSERT *
-        """)
-    except Exception as e:
-        logging.error(json.dumps({"event": "sink_failed", "sink": "iceberg_txn_lake", "batch_id": batch_id, "error": str(e)}))
-
-    # ── MERGE processed_batches (exactly-once by batch_id) ────────
-    try:
-        spark.sql(f"""
-            MERGE INTO iceberg.fraud.processed_batches AS t
-            USING (SELECT CAST({batch_id} AS BIGINT) AS batch_id,
-                          current_timestamp() AS processed_at) AS s
-            ON t.batch_id = s.batch_id
-            WHEN NOT MATCHED THEN INSERT *
-        """)
-    except Exception as e:
-        logging.error(json.dumps({"event": "sink_failed", "sink": "iceberg_processed_batches", "batch_id": batch_id, "error": str(e)}))
-
-    # ── EXPIRE SNAPSHOTS (steady-state: 1 snapshot per table) ─────
-    try:
-        spark.sql("CALL iceberg.system.expire_snapshots('fraud.transactions_lake', retain_last => 1)")
-    except Exception as e:
-        logging.error(json.dumps({"event": "expire_snapshots_failed", "table": "transactions_lake", "error": str(e)}))
-    try:
-        spark.sql("CALL iceberg.system.expire_snapshots('fraud.processed_batches', retain_last => 1)")
-    except Exception as e:
-        logging.error(json.dumps({"event": "expire_snapshots_failed", "table": "processed_batches", "error": str(e)}))
-
-    batch_df.unpersist()
 
 # ── DLQ SINK ──────────────────────────────────────────────────────────
 dlq_out = bad.select(
@@ -706,21 +625,12 @@ dlq_query = (
     .start()
 )
 
-# ── HOT SINK (10s trigger) ─────────────────────────────────
-hot_query = (
+# ── MAIN SINK (10s trigger, scorer fan-out) ──────────────
+main_query = (
     final_df.writeStream
     .foreachBatch(write_hot_sinks)
     .option("checkpointLocation", f"{CHECKPOINT_BASE}/main")
     .trigger(processingTime=TRIGGER_INTERVAL)
-    .start()
-)
-
-# ── COLD SINK (5min trigger, Iceberg MERGE + expire) ──────
-cold_query = (
-    final_df.writeStream
-    .foreachBatch(write_cold_sinks)
-    .option("checkpointLocation", f"{CHECKPOINT_BASE}/cold")
-    .trigger(processingTime=COLD_TRIGGER_INTERVAL)
     .start()
 )
 
