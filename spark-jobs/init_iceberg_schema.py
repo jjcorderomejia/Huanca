@@ -69,7 +69,10 @@ spark.sql("""
         ingest_time    TIMESTAMP,
         fraud_score    INT,
         is_flagged     BOOLEAN,
-        reasons        STRING
+        reasons        STRING,
+        k_topic        STRING,
+        k_partition    LONG,
+        k_offset       LONG
     )
     USING iceberg
     PARTITIONED BY (days(event_time))
