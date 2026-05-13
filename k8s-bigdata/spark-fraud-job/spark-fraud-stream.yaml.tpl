@@ -29,6 +29,10 @@ spec:
     # Spark 3.4+ KafkaOffsetReaderAdmin uses AdminClient.describeTopics which
     # times out against Redpanda — the deprecated consumer path works correctly.
     "spark.sql.streaming.kafka.useDeprecatedOffsetFetching": "true"
+    # RocksDB state store: avoids HDFSBacked rename race on S3A (caused 1.delta
+    # FileNotFoundException incident 2026-05-13). State lives on local executor
+    # disk; checkpointed to S3 in bulk on commit.
+    "spark.sql.streaming.stateStore.providerClass": "org.apache.spark.sql.execution.streaming.state.RocksDBStateStoreProvider"
 
   driver:
     cores: 1
@@ -52,6 +56,8 @@ spec:
         value: "transactions-clean"
       - name: TOPIC_ALERTS
         value: "fraud-alerts"
+      - name: TOPIC_SCORED
+        value: "transactions-scored"
       - name: STARROCKS_HOST
         value: "starrocks-fe-svc.bigdata.svc.cluster.local"
       - name: STARROCKS_PORT
