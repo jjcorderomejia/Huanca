@@ -30,7 +30,9 @@ with DAG(
     "fraud_iceberg_orphans",
     default_args=default_args,
     description="Daily Iceberg remove_orphan_files on fraud tables",
-    schedule="@daily",
+    # 04:00 UTC — 2h clear of the 02:00 customer/feature-refresh batch;
+    # remove_orphan_files is a heavy full-scan, keep it off that window.
+    schedule="0 4 * * *",
     start_date=PIPELINE_EPOCH,
     catchup=False,
     # max_active_runs=1 — remove_orphan_files is a destructive full-scan;
