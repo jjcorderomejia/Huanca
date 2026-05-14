@@ -1,0 +1,58 @@
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: remove-orphans-iceberg
+  namespace: bigdata
+spec:
+  type: Python
+  pythonVersion: "3"
+  mode: cluster
+  # image injected at runtime by fraud_iceberg_orphans DAG via FRAUD_SPARK_IMAGE Airflow Variable
+  image: "__SPARK_IMAGE__"
+  imagePullPolicy: Always
+  mainApplicationFile: "local:///opt/spark/jobs/fraud_iceberg_orphans.py"
+  sparkVersion: "3.5.0"
+  restartPolicy:
+    type: Never
+  driver:
+    cores: 1
+    memory: "4g"
+    serviceAccount: spark
+    # 4g — remove_orphan_files is a heavy full-scan (lists every file, cross-checks
+    # every snapshot). Same OOM lesson as expire: 1g/2g OOMKills against bloated tables.
+    env:
+      - name: MINIO_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: minio-secret
+            key: MINIO_ROOT_USER
+      - name: MINIO_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: minio-secret
+            key: MINIO_ROOT_PASSWORD
+      - name: ICEBERG_DB_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: airflow-postgresql
+            key: postgres-password
+  executor:
+    cores: 1
+    instances: 1
+    memory: "4g"
+    env:
+      - name: MINIO_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: minio-secret
+            key: MINIO_ROOT_USER
+      - name: MINIO_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: minio-secret
+            key: MINIO_ROOT_PASSWORD
+      - name: ICEBERG_DB_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: airflow-postgresql
+            key: postgres-password
