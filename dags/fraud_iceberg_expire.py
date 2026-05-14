@@ -32,6 +32,10 @@ with DAG(
     schedule="@hourly",
     start_date=PIPELINE_EPOCH,
     catchup=False,
+    # max_active_runs=1 — expire_snapshots is a destructive table-metadata op;
+    # concurrent runs against the same Iceberg tables hit commit conflicts and
+    # waste resources. Never allow two expire runs to overlap.
+    max_active_runs=1,
     sla_miss_callback=sla_miss_callback,
     tags=["fraud", "iceberg", "expire"],
 ) as dag:
