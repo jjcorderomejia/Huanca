@@ -30,6 +30,7 @@ spec:
 
   driver:
     cores: 1
+    coreRequest: "500m"
     coreLimit: "1000m"
     memory: "1g"
     serviceAccount: spark
@@ -72,6 +73,7 @@ spec:
   executor:
     instances: 1
     cores: 1
+    coreRequest: "500m"
     memory: "2g"
     memoryOverhead: "512m"
     podSecurityContext:

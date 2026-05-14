@@ -36,6 +36,7 @@ spec:
 
   driver:
     cores: 1
+    coreRequest: "500m"
     coreLimit: "1200m"
     memory: "2g"
     serviceAccount: spark
@@ -104,11 +105,14 @@ spec:
   executor:
     instances: 1
     cores: 1
+    coreRequest: "500m"
     memory: "4g"
     memoryOverhead: "512m"
     # Sized for steady-state 6 tx/min. Was instances=2, cores=2, 8g — over-spec'd
     # for backlog catch-up. Replay is safe (Kafka source-of-truth; STARTING_OFFSETS=earliest;
     # MERGE on Kafka offsets is idempotent; StarRocks PK upserts dedupe).
+    # coreRequest 500m decouples K8s scheduler reservation from Spark logical cores;
+    # under burst, K8s may throttle to 0.5 actual CPU — acceptable for steady state.
     # fsGroup must match driver — both use hadoop GID 1000 from the same base image.
     podSecurityContext:
       runAsNonRoot: true
