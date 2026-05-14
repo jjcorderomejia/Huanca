@@ -106,13 +106,13 @@ spec:
     instances: 1
     cores: 1
     coreRequest: "500m"
-    memory: "4g"
-    memoryOverhead: "512m"
-    # Sized for steady-state 6 tx/min. Was instances=2, cores=2, 8g — over-spec'd
-    # for backlog catch-up. Replay is safe (Kafka source-of-truth; STARTING_OFFSETS=earliest;
-    # MERGE on Kafka offsets is idempotent; StarRocks PK upserts dedupe).
+    memory: "8g"
+    memoryOverhead: "1g"
+    # instances/cores cut from 2/2 → 1/1 to free scheduler CPU. memory stays 8g:
+    # 4g OOMKilled (exit 137) repeatedly during backlog replay — applyInPandasWithState
+    # pandas state + broadcast join + persist on 50k-offset batches needs the headroom.
     # coreRequest 500m decouples K8s scheduler reservation from Spark logical cores;
-    # under burst, K8s may throttle to 0.5 actual CPU — acceptable for steady state.
+    # under burst, K8s may throttle to 0.5 actual CPU — acceptable, does not OOM.
     # fsGroup must match driver — both use hadoop GID 1000 from the same base image.
     podSecurityContext:
       runAsNonRoot: true
