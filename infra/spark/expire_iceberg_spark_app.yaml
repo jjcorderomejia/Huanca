@@ -16,8 +16,10 @@ spec:
     type: Never
   driver:
     cores: 1
-    memory: "1g"
+    memory: "4g"
     serviceAccount: spark
+    # 4g (was 1g) — needed for one-shot recovery against 47K bloated metadata files.
+    # Steady-state expire (1 snapshot of recent data) only needs ~1g, but oversize is safe.
     env:
       - name: MINIO_ACCESS_KEY
         valueFrom:
@@ -37,7 +39,7 @@ spec:
   executor:
     cores: 1
     instances: 1
-    memory: "2g"
+    memory: "4g"
     env:
       - name: MINIO_ACCESS_KEY
         valueFrom:
