@@ -97,21 +97,37 @@ scored = (
 
 # ── MERGE INTO transactions_lake (exactly-once by Kafka offsets) ──────
 def write_iceberg(batch_df, batch_id: int):
+    """MERGE batch_df into Iceberg using offset composite key for exactly-once.
+
+    Uses createOrReplaceGlobalTempView (not createOrReplaceTempView) — Iceberg's
+    MERGE INTO analyzer cannot resolve default-catalog (spark_catalog.default)
+    temp views, so the source must live in global_temp which is visible across
+    catalogs. Don't 'simplify' this back to local temp view — it will silently
+    fail every batch with TABLE_OR_VIEW_NOT_FOUND.
+
+    Exceptions are intentionally NOT caught: MERGE on offset key is idempotent,
+    so Spark Structured Streaming's automatic batch retry is the correct
+    recovery path. Swallowing the exception would mask persistent failures and
+    advance the checkpoint past unwritten data.
+    """
     if batch_df.isEmpty():
         return
-    batch_df.createOrReplaceTempView("_batch")
+
+    view_name = "_iceberg_writer_batch"
+    batch_df.createOrReplaceGlobalTempView(view_name)
     try:
-        spark.sql("""
+        spark.sql(f"""
             MERGE INTO iceberg.fraud.transactions_lake AS t
-            USING _batch AS s
+            USING global_temp.{view_name} AS s
             ON  t.k_topic     = s.k_topic
             AND t.k_partition = s.k_partition
             AND t.k_offset    = s.k_offset
             WHEN NOT MATCHED THEN INSERT *
         """)
-        log.info(json.dumps({"event": "merge_ok", "batch_id": batch_id, "rows": batch_df.count()}))
-    except Exception as e:
-        logging.error(json.dumps({"event": "merge_failed", "batch_id": batch_id, "error": str(e)}))
+        log.info(json.dumps({"event": "merge_ok", "batch_id": batch_id}))
+    finally:
+        # Drop view even on failure — prevents stale view leaking into next batch.
+        spark.catalog.dropGlobalTempView(view_name)
 
 writer_query = (
     scored.writeStream
