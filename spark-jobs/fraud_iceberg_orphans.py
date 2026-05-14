@@ -2,9 +2,10 @@
 Iceberg Remove-Orphan-Files Job
 Runs remove_orphan_files on transactions_lake + processed_batches.
 Daily via Airflow SparkKubernetesOperator. Removes files referenced by no
-snapshot (failed commits, old append-mode era). Default older_than = now-3d
+snapshot (failed commits, old append-mode era). Explicit older_than = now-5d
 protects the active iceberg-writer's in-flight commit files.
 """
+import datetime
 import logging
 import os
 
@@ -24,6 +25,15 @@ TABLES = [
     "iceberg.fraud.transactions_lake",
     "iceberg.fraud.processed_batches",
 ]
+
+# 5-day older_than — explicit (was relying on Iceberg's implicit 3-day default).
+# Protects the active iceberg-writer's in-flight commit files; conservative on
+# purpose — too-long only delays cleanup, too-short risks deleting live files.
+OLDER_THAN_DAYS = 5
+OLDER_THAN = (
+    datetime.datetime.now(datetime.timezone.utc)
+    - datetime.timedelta(days=OLDER_THAN_DAYS)
+).strftime("%Y-%m-%d %H:%M:%S")
 
 spark = (
     SparkSession.builder
@@ -50,14 +60,15 @@ spark = (
 
 try:
     for table in TABLES:
-        # Default older_than = now - 3 days — do NOT lower it; that protects
-        # the active iceberg-writer's in-flight commit files from deletion.
+        # older_than = now - 5 days, explicit (Iceberg's implicit default is
+        # 3d) — protects the active iceberg-writer's in-flight commit files.
         spark.sql(f"""
             CALL iceberg.system.remove_orphan_files(
-                table => '{table}'
+                table => '{table}',
+                older_than => TIMESTAMP '{OLDER_THAN}'
             )
         """)
-        log.info("%s orphan files removed", table)
+        log.info("%s orphan files removed (older_than %s)", table, OLDER_THAN)
 
     log.info("Iceberg remove-orphan-files complete")
 finally:

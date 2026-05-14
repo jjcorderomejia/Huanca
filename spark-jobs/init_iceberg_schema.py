@@ -1,13 +1,18 @@
 """
-Iceberg Schema Init Job — run ONCE on initial deploy.
+Iceberg Schema Init Job — idempotent, safe (and intended) to re-run.
 
-Owns ALL Iceberg DDL. Creates all four tables if they do not exist:
+Owns ALL Iceberg DDL and table lifecycle properties. Creates all four tables
+if they do not exist, and re-asserts metadata-cleanup TBLPROPERTIES on
+transactions_lake + processed_batches every run:
   - iceberg.fraud.customers         — customer enrichment reference
   - iceberg.fraud.transactions_lake — full audit trail (partitioned by event_time)
   - iceberg.fraud.processed_batches — streaming batch dedup guard
   - iceberg.fraud.risk_profiles     — risk profile snapshot, synced from StarRocks by Airflow
 
-Run before any other Spark job. Safe to re-run (CREATE TABLE IF NOT EXISTS).
+Run before any other Spark job. Re-running converges new AND existing tables
+to the desired schema + properties (CREATE TABLE IF NOT EXISTS and ALTER TABLE
+SET TBLPROPERTIES are both idempotent). This is the home of the S4
+metadata-bloat fix — see ops/S4-iceberg-metadata-bloat.md.
 """
 import os
 from pyspark.sql import SparkSession
@@ -77,7 +82,13 @@ spark.sql("""
     USING iceberg
     PARTITIONED BY (days(event_time))
 """)
-print("✅ iceberg.fraud.transactions_lake ready")
+spark.sql("""
+    ALTER TABLE iceberg.fraud.transactions_lake SET TBLPROPERTIES (
+        'write.metadata.delete-after-commit.enabled' = 'true',
+        'write.metadata.previous-versions-max'       = '20'
+    )
+""")
+print("✅ iceberg.fraud.transactions_lake ready (lifecycle props set)")
 
 # ── PROCESSED BATCHES — streaming batch dedup guard ───────────────────
 spark.sql("""
@@ -87,7 +98,13 @@ spark.sql("""
     )
     USING iceberg
 """)
-print("✅ iceberg.fraud.processed_batches ready")
+spark.sql("""
+    ALTER TABLE iceberg.fraud.processed_batches SET TBLPROPERTIES (
+        'write.metadata.delete-after-commit.enabled' = 'true',
+        'write.metadata.previous-versions-max'       = '20'
+    )
+""")
+print("✅ iceberg.fraud.processed_batches ready (lifecycle props set)")
 
 # ── RISK PROFILES — snapshot synced from StarRocks by Airflow ─────────
 spark.sql("""
