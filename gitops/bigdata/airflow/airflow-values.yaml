@@ -2,6 +2,20 @@ executor: KubernetesExecutor
 
 webserverSecretKeySecretName: airflow-webserver-secret
 
+# fsGroupChangePolicy: Always — without it, kubelet's default OnRootMismatch
+# skips re-applying fsGroup when the PVC root gid already matches (it does, =0),
+# leaving /opt/airflow/logs at 755 root:root — non-writable by the uid-50000
+# worker, so new DAGs fail to create their log dir (PermissionError on
+# /opt/airflow/logs/dag_id=<new dag>). "Always" forces the recursive
+# group-write fix on every mount. Applies to all Airflow pods including
+# KubernetesExecutor task pods, which are the ones that create the log dirs.
+securityContexts:
+  pod:
+    runAsUser: 50000
+    runAsGroup: 0
+    fsGroup: 0
+    fsGroupChangePolicy: "Always"
+
 env:
   - name: AIRFLOW__CORE__LOAD_EXAMPLES
     value: "false"
