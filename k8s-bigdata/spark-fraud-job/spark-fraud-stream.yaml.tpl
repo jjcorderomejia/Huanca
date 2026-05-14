@@ -102,10 +102,13 @@ spec:
         readOnly: true
 
   executor:
-    instances: 2
-    cores: 2
-    memory: "8g"
-    memoryOverhead: "1g"
+    instances: 1
+    cores: 1
+    memory: "4g"
+    memoryOverhead: "512m"
+    # Sized for steady-state 6 tx/min. Was instances=2, cores=2, 8g — over-spec'd
+    # for backlog catch-up. Replay is safe (Kafka source-of-truth; STARTING_OFFSETS=earliest;
+    # MERGE on Kafka offsets is idempotent; StarRocks PK upserts dedupe).
     # fsGroup must match driver — both use hadoop GID 1000 from the same base image.
     podSecurityContext:
       runAsNonRoot: true
