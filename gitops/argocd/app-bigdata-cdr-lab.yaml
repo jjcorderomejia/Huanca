@@ -1,0 +1,35 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: bigdata-cdr-lab
+  namespace: argocd
+spec:
+  project: default
+  source:
+    # HTTPS (public-read for Huanca) — paired with the
+    # argocd.argoproj.io/secret-type=repository Secret in the argocd
+    # namespace per cluster-config/manifests/argocd/DESIGN.md D29.
+    repoURL: https://github.com/jjcorderomejia/Huanca.git
+    targetRevision: main
+    path: gitops/bigdata
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: bigdata
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # Pre-staged for the ArgoCD v2→v3 controller upgrade (B3 Stage B).
+      # v3 flips the controller diff engine default from client-side to
+      # server-side apply (controller.diff.server.side: "true" in
+      # cluster-config/manifests/argocd/values.yaml). Declaring
+      # ServerSideApply on the Application makes the transition
+      # deliberate at the sync-option layer rather than a silent flip on
+      # the first v3 reconcile. ServerSideApply is the K8s >=1.30
+      # recommendation and the mode this Application will run under
+      # post-B3 regardless. Cites:
+      #   - https://argo-cd.readthedocs.io/en/stable/operator-manual/upgrading/3.0/
+      #   - https://argo-cd.readthedocs.io/en/stable/user-guide/sync-options/#server-side-apply
+      - ServerSideApply=true
