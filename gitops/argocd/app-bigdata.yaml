@@ -3,6 +3,15 @@ kind: Application
 metadata:
   name: bigdata-fraud-lab
   namespace: argocd
+  # Pass 6 Manifest-M6-M5 fix: resources-finalizer.argocd.argoproj.io tells ArgoCD to
+  # cascade-delete this Application's managed resources when the Application CR itself is
+  # deleted. Without the finalizer, `kubectl delete application bigdata-fraud-lab -n argocd`
+  # removes the App but leaves every Deployment/Service/ConfigMap it created orphaned in
+  # `bigdata` ns. Matches the canonical pattern in
+  # cluster-config/manifests/platform-rbac/application.yaml.
+  # Cite: argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/#about-the-deletion-finalizer
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   source:
