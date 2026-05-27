@@ -6,10 +6,13 @@ metadata:
 spec:
   project: default
   source:
-    # HTTPS (public-read for Huanca) — paired with the
-    # argocd.argoproj.io/secret-type=repository Secret in the argocd
-    # namespace per cluster-config/manifests/argocd/DESIGN.md D29.
-    repoURL: https://github.com/jjcorderomejia/Huanca.git
+    # Pass 6 H7 fix: align with `bigdata-fraud-lab` (SSH) and the single
+    # `huanca-repo` repository Secret (SSH key). The prior HTTPS URL had
+    # NO matching repository Secret — worked only because Huanca is
+    # public-read today; would have broken the moment Huanca privacy
+    # flipped. Asymmetric URL scheme across the two bigdata Applications
+    # for the same underlying repo was a latent bomb.
+    repoURL: git@github.com:jjcorderomejia/Huanca.git
     targetRevision: main
     path: gitops/bigdata
   destination:
