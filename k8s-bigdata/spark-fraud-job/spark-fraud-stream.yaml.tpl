@@ -33,6 +33,15 @@ spec:
     # FileNotFoundException incident 2026-05-13). State lives on local executor
     # disk; checkpointed to S3 in bulk on commit.
     "spark.sql.streaming.stateStore.providerClass": "org.apache.spark.sql.execution.streaming.state.RocksDBStateStoreProvider"
+    # Native memory caps (S7-streaming-executor-oom-sigkill.md). The default JVM
+    # has NO upper bound on direct memory, metaspace, or code cache — combined
+    # with -Xms=-Xmx (Spark pre-commits the full heap), the pod is structurally
+    # set up to exceed its cgroup limit. These caps make any genuine native leak
+    # throw a Java OOM with a stack trace naming the pool, instead of a silent
+    # kernel SIGKILL with no diagnostic signal.
+    # Budget: 1g direct + 512m metaspace + 256m code cache + ~500m Python workers
+    # + ~250m JVM bookkeeping ≈ 2.5g native. Pairs with memoryOverhead: "4g".
+    "spark.executor.extraJavaOptions": "-XX:MaxDirectMemorySize=1g -XX:MaxMetaspaceSize=512m -XX:ReservedCodeCacheSize=256m -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp"
 
   driver:
     cores: 1
@@ -106,11 +115,17 @@ spec:
     instances: 1
     cores: 1
     coreRequest: "500m"
-    memory: "8g"
-    memoryOverhead: "1g"
-    # instances/cores cut from 2/2 → 1/1 to free scheduler CPU. memory stays 8g:
-    # 4g OOMKilled (exit 137) repeatedly during backlog replay — applyInPandasWithState
-    # pandas state + broadcast join + persist on 50k-offset batches needs the headroom.
+    memory: "5g"
+    memoryOverhead: "4g"
+    # Pod stays at 9g total. Rebalanced 8g+1g → 5g+4g after S7 forensics
+    # (huanca/ops/S7-streaming-executor-oom-sigkill.md): measured peak heap 1.7g,
+    # native floor ~2g (Python workers + Arrow IPC + Kafka + Netty + RocksDB JNI
+    # + metaspace). 1g overhead was structurally insufficient — guaranteed cgroup
+    # SIGKILL within 10-17h. The extraJavaOptions caps in sparkConf above convert
+    # any genuine native leak into a loud Java OOM with stack trace, instead of a
+    # silent kernel SIGKILL that burns through executionAttempts.
+    # Prior 4g→8g bump (2026-04 incident) doubled the wrong budget; native was
+    # the starved pool. Lesson: heap usage (jstat -gc) is the load-bearing signal.
     # coreRequest 500m decouples K8s scheduler reservation from Spark logical cores;
     # under burst, K8s may throttle to 0.5 actual CPU — acceptable, does not OOM.
     # fsGroup must match driver — both use hadoop GID 1000 from the same base image.
