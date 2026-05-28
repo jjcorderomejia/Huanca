@@ -366,53 +366,35 @@ velocity_df = (
     )
 )
 
-# ── ENRICHMENT + SCORING — hoisted into the streaming plan (S7) ───────
-# Previously these columns were added inside foreachBatch, which meant a fresh
-# broadcast hint and a fresh codegen pass for every micro-batch. By moving them
-# here, Spark builds the plan ONCE at stream start and reuses it across all
-# triggers — no per-batch native buffer churn from customer-broadcast rebuilds,
-# no per-batch codegen of identical column expressions.
-# risk_bc is still refreshed dynamically inside foreachBatch (60s TTL) because
-# its broadcast must be replaced at runtime; compute_geo_udf reads it by name.
+# ── PARTIAL ENRICHMENT — hoisted into the streaming plan (S7) ─────────
+# Customer join + velocity_score + zscore are SAFE to hoist because they have
+# NO reference to a dynamic broadcast. customers_df is static (loaded once at
+# startup); its broadcast is built once during streaming-plan compile and
+# reused across all micro-batches — wins back the per-batch broadcast churn.
+#
+# DO NOT hoist compute_geo_udf into this plan. The streaming plan caches the
+# UDF closure at plan-compile time, pinning whichever risk_bc existed then.
+# Later destroy() of that broadcast (or any subsequent refresh) breaks the
+# plan with [INTERNAL_ERROR_BROADCAST] Attempted to use Broadcast(N) after it
+# was destroyed. Verified by regression on app_sha=973a653; reverted here.
+# Geo scoring + final fraud_score therefore live inside foreachBatch, where
+# each invocation re-serializes compute_geo with the current risk_bc.
 final_df = (
     velocity_df
-    # Customer enrichment via stream-static broadcast join
     .join(broadcast(customers_df), velocity_df.user_id == customers_df.c_user_id, "left")
     .drop("c_user_id")
     .withColumn("plan",
         when(col("plan").isNull(), lit("unknown")).otherwise(col("plan")))
     .withColumn("avg_amount_30d",
         when(col("avg_amount_30d").isNull(), lit(0.0)).otherwise(col("avg_amount_30d")))
-    # Velocity score
     .withColumn("score_velocity",
         when(col("velocity_5min") > VELOCITY_THRESHOLD, lit(40)).otherwise(lit(0)))
-    # Z-score (simplified stddev = 30% of mean — pending business calibration)
     .withColumn("amount_zscore",
         when(col("avg_amount_30d") > 0,
             (col("amount") - col("avg_amount_30d")) / (col("avg_amount_30d") * 0.3))
         .otherwise(lit(0.0)))
     .withColumn("score_zscore",
         when(col("amount_zscore") > ZSCORE_THRESHOLD, lit(30)).otherwise(lit(0)))
-    # Geo speed via risk_bc broadcast (refreshed in foreachBatch, read by name)
-    .withColumn("geo_speed_kmh",
-        compute_geo_udf(
-            col("user_id"), col("merchant_lat"),
-            col("merchant_lon"), col("event_time")
-        )
-    )
-    .withColumn("score_geo",
-        when(col("geo_speed_kmh") > GEO_SPEED_THRESHOLD, lit(30)).otherwise(lit(0)))
-    # Final score + flag + reasons
-    .withColumn("fraud_score",
-        col("score_velocity") + col("score_zscore") + col("score_geo"))
-    .withColumn("is_flagged", col("fraud_score") >= FRAUD_SCORE_CUTOFF)
-    .withColumn("reasons", expr("""
-        concat_ws(',',
-          case when score_velocity > 0 then 'HIGH_VELOCITY' end,
-          case when score_zscore   > 0 then 'AMOUNT_ANOMALY' end,
-          case when score_geo      > 0 then 'GEO_IMPOSSIBLE' end
-        )
-    """))
 )
 
 # ── HOT SINKS — StarRocks + Kafka (10s trigger) ─────────────────────
@@ -423,9 +405,31 @@ def write_hot_sinks(batch_df, batch_id: int):
 
     refresh_risk_if_stale()
 
-    # Persist after the streaming-plan enrichment + scoring so the 7 downstream
-    # write actions reuse the same materialized rows.
-    batch_df = batch_df.persist(StorageLevel.MEMORY_AND_DISK)
+    # Geo scoring + final fraud_score MUST live in foreachBatch (not the
+    # streaming plan) so that compute_geo_udf is re-serialized each batch and
+    # picks up the current risk_bc. See note on final_df above.
+    batch_df = (
+        batch_df
+        .withColumn("geo_speed_kmh",
+            compute_geo_udf(
+                col("user_id"), col("merchant_lat"),
+                col("merchant_lon"), col("event_time")
+            )
+        )
+        .withColumn("score_geo",
+            when(col("geo_speed_kmh") > GEO_SPEED_THRESHOLD, lit(30)).otherwise(lit(0)))
+        .withColumn("fraud_score",
+            col("score_velocity") + col("score_zscore") + col("score_geo"))
+        .withColumn("is_flagged", col("fraud_score") >= FRAUD_SCORE_CUTOFF)
+        .withColumn("reasons", expr("""
+            concat_ws(',',
+              case when score_velocity > 0 then 'HIGH_VELOCITY' end,
+              case when score_zscore   > 0 then 'AMOUNT_ANOMALY' end,
+              case when score_geo      > 0 then 'GEO_IMPOSSIBLE' end
+            )
+        """))
+        .persist(StorageLevel.MEMORY_AND_DISK)
+    )
 
     # ── OBSERVABILITY — single aggregation pass ────────────────────
     stats = batch_df.agg(
