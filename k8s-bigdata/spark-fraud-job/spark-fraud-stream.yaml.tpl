@@ -33,6 +33,15 @@ spec:
     # FileNotFoundException incident 2026-05-13). State lives on local executor
     # disk; checkpointed to S3 in bulk on commit.
     "spark.sql.streaming.stateStore.providerClass": "org.apache.spark.sql.execution.streaming.state.RocksDBStateStoreProvider"
+    # Event log to MinIO with rolling — item #1 of S7-observability-debt.md.
+    # Without this, post-mortems for executor crashes have no per-executor
+    # memory-pool history (Spark History Server has no data to render).
+    # Rolling at 128 MB caps individual file size; MinIO bucket lifecycle
+    # (configured separately via mc ilm rule add) handles retention.
+    "spark.eventLog.enabled": "true"
+    "spark.eventLog.dir": "s3a://checkpoints/spark-events"
+    "spark.eventLog.rolling.enabled": "true"
+    "spark.eventLog.rolling.maxFileSize": "128m"
     # Native memory caps (S7-streaming-executor-oom-sigkill.md). The default JVM
     # has NO upper bound on direct memory, metaspace, or code cache — combined
     # with -Xms=-Xmx (Spark pre-commits the full heap), the pod is structurally
