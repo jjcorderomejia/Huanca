@@ -238,51 +238,57 @@ def refresh_risk_if_stale():
             .rdd.map(lambda r: (r.user_id, r.asDict()))
             .collectAsMap()
         )
+        old_bc = risk_bc
         risk_bc = spark.sparkContext.broadcast(data)
+        # Explicit destroy of the old broadcast (S7): without this we relied on
+        # ContextCleaner picking up the weak reference, which lags under heap
+        # pressure. blocking=False keeps refresh latency bounded.
+        try:
+            old_bc.destroy(blocking=False)
+        except Exception:
+            pass  # already GC'd or never materialized — safe to ignore
         _risk_cache["loaded_at"] = time.time()
     except Exception as e:
         logging.error(json.dumps({"event": "risk_refresh_failed", "error": str(e)}))
 
-# ── CUSTOMER ENRICHMENT CACHE ──────────────────────────────────────────
-# TTL-based in-memory cache. Loaded from iceberg.fraud.customers on MinIO.
-# Populated daily by Airflow (customer_csv_to_iceberg.py).
-# Refreshes every CUSTOMER_CACHE_TTL seconds inside foreachBatch.
-_customer_cache: dict = {"df": None, "loaded_at": 0.0}
-
-def get_customers_df():
-    """Returns customer enrichment DataFrame from Iceberg, refreshing if TTL expired.
-    Falls back to empty schema DataFrame if table not yet populated (first-boot / Airflow
-    hasn't run yet). Stream degrades gracefully — plan and avg_amount_30d will be null
-    until the daily fraud_customer_refresh DAG seeds the data."""
-    now = time.time()
-    if _customer_cache["df"] is None or (now - _customer_cache["loaded_at"]) > CUSTOMER_CACHE_TTL:
-        try:
-            df = (
-                spark.read
-                .format("iceberg")
-                .load(CUSTOMER_ICEBERG_TABLE)
-                .select(
-                    col("user_id").alias("c_user_id"),
-                    col("plan"),
-                    col("avg_amount_30d").cast("double")
-                )
+# ── CUSTOMER ENRICHMENT — loaded ONCE at startup (S7) ─────────────────
+# Hoisted out of foreachBatch: previously this DataFrame was reloaded per batch
+# (every 10s) AND broadcast(customers_df) was applied inside the per-batch query,
+# creating a new TorrentBroadcast each micro-batch. After hoisting, the broadcast
+# is built once during streaming-plan compilation and reused across all batches —
+# eliminating direct-buffer churn on every trigger.
+# Trade-off: customers table updates (Airflow daily DAG) are picked up only on
+# stream restart. Acceptable because Airflow rewrites customers once per day and
+# the streaming app is restarted nightly with the image build.
+# Falls back to empty schema if table not yet populated (first-boot before Airflow
+# seeds data). plan and avg_amount_30d will be null until next restart.
+def _load_customers_static():
+    try:
+        df = (
+            spark.read
+            .format("iceberg")
+            .load(CUSTOMER_ICEBERG_TABLE)
+            .select(
+                col("user_id").alias("c_user_id"),
+                col("plan"),
+                col("avg_amount_30d").cast("double")
             )
-            _ = df.schema  # force JVM analysis — raises AnalysisException here if table missing
-        except Exception as e:
-            if "TABLE_OR_VIEW_NOT_FOUND" in str(e) or "table or view" in str(e).lower():
-                logging.warning(json.dumps({
-                    "event": "customer_table_not_found",
-                    "table": CUSTOMER_ICEBERG_TABLE,
-                    "note": "using empty enrichment until Airflow seeds data"
-                }))
-                df = spark.createDataFrame(
-                    [], "c_user_id STRING, plan STRING, avg_amount_30d DOUBLE"
-                )
-            else:
-                raise
-        _customer_cache["df"] = df
-        _customer_cache["loaded_at"] = now
-    return _customer_cache["df"]
+        )
+        _ = df.schema  # force JVM analysis — raises AnalysisException here if missing
+        return df
+    except Exception as e:
+        if "TABLE_OR_VIEW_NOT_FOUND" in str(e) or "table or view" in str(e).lower():
+            logging.warning(json.dumps({
+                "event": "customer_table_not_found",
+                "table": CUSTOMER_ICEBERG_TABLE,
+                "note": "using empty enrichment until stream restart picks up Airflow-seeded data"
+            }))
+            return spark.createDataFrame(
+                [], "c_user_id STRING, plan STRING, avg_amount_30d DOUBLE"
+            )
+        raise
+
+customers_df = _load_customers_static()
 
 # ── OBSERVABILITY ACCUMULATORS ─────────────────────────────────────────
 # Driver-side counters visible in Spark UI.
@@ -348,7 +354,7 @@ good   = tagged.filter(col("dlq_reason").isNull()).drop("dlq_reason", "j")
 # Window cutoff anchored to max(event_time) — event-time correct, lag tolerant.
 # Emits one enriched row per input record immediately each micro-batch.
 # No watermark cascade, no stream-stream join buffering.
-final_df = (
+velocity_df = (
     good
     .groupBy("user_id")
     .applyInPandasWithState(
@@ -360,6 +366,55 @@ final_df = (
     )
 )
 
+# ── ENRICHMENT + SCORING — hoisted into the streaming plan (S7) ───────
+# Previously these columns were added inside foreachBatch, which meant a fresh
+# broadcast hint and a fresh codegen pass for every micro-batch. By moving them
+# here, Spark builds the plan ONCE at stream start and reuses it across all
+# triggers — no per-batch native buffer churn from customer-broadcast rebuilds,
+# no per-batch codegen of identical column expressions.
+# risk_bc is still refreshed dynamically inside foreachBatch (60s TTL) because
+# its broadcast must be replaced at runtime; compute_geo_udf reads it by name.
+final_df = (
+    velocity_df
+    # Customer enrichment via stream-static broadcast join
+    .join(broadcast(customers_df), velocity_df.user_id == customers_df.c_user_id, "left")
+    .drop("c_user_id")
+    .withColumn("plan",
+        when(col("plan").isNull(), lit("unknown")).otherwise(col("plan")))
+    .withColumn("avg_amount_30d",
+        when(col("avg_amount_30d").isNull(), lit(0.0)).otherwise(col("avg_amount_30d")))
+    # Velocity score
+    .withColumn("score_velocity",
+        when(col("velocity_5min") > VELOCITY_THRESHOLD, lit(40)).otherwise(lit(0)))
+    # Z-score (simplified stddev = 30% of mean — pending business calibration)
+    .withColumn("amount_zscore",
+        when(col("avg_amount_30d") > 0,
+            (col("amount") - col("avg_amount_30d")) / (col("avg_amount_30d") * 0.3))
+        .otherwise(lit(0.0)))
+    .withColumn("score_zscore",
+        when(col("amount_zscore") > ZSCORE_THRESHOLD, lit(30)).otherwise(lit(0)))
+    # Geo speed via risk_bc broadcast (refreshed in foreachBatch, read by name)
+    .withColumn("geo_speed_kmh",
+        compute_geo_udf(
+            col("user_id"), col("merchant_lat"),
+            col("merchant_lon"), col("event_time")
+        )
+    )
+    .withColumn("score_geo",
+        when(col("geo_speed_kmh") > GEO_SPEED_THRESHOLD, lit(30)).otherwise(lit(0)))
+    # Final score + flag + reasons
+    .withColumn("fraud_score",
+        col("score_velocity") + col("score_zscore") + col("score_geo"))
+    .withColumn("is_flagged", col("fraud_score") >= FRAUD_SCORE_CUTOFF)
+    .withColumn("reasons", expr("""
+        concat_ws(',',
+          case when score_velocity > 0 then 'HIGH_VELOCITY' end,
+          case when score_zscore   > 0 then 'AMOUNT_ANOMALY' end,
+          case when score_geo      > 0 then 'GEO_IMPOSSIBLE' end
+        )
+    """))
+)
+
 # ── HOT SINKS — StarRocks + Kafka (10s trigger) ─────────────────────
 def write_hot_sinks(batch_df, batch_id: int):
     global acc_total, acc_flagged, acc_geo_hits
@@ -368,67 +423,9 @@ def write_hot_sinks(batch_df, batch_id: int):
 
     refresh_risk_if_stale()
 
-    # ── VELOCITY SCORE ────────────────────────────────────────────
-    # velocity_5min arrives from _velocity_state_fn (flatMapGroupsWithState).
-    # Score computed here to keep the streaming plan free of Column expressions.
-    batch_df = batch_df.withColumn("score_velocity",
-        when(col("velocity_5min") > VELOCITY_THRESHOLD, lit(40)).otherwise(lit(0)))
-
-    # ── CUSTOMER ENRICHMENT ───────────────────────────────────────
-    # TTL-cached Iceberg read — reloads at most every CUSTOMER_CACHE_TTL seconds.
-    # Populated daily by Airflow (customer_csv_to_iceberg.py).
-    customers_df = get_customers_df()
-    batch_df = (
-        batch_df
-        .join(broadcast(customers_df), batch_df.user_id == customers_df.c_user_id, "left")
-        .drop("c_user_id")
-        .withColumn("plan",
-            when(col("plan").isNull(), lit("unknown")).otherwise(col("plan")))
-        .withColumn("avg_amount_30d",
-            when(col("avg_amount_30d").isNull(), lit(0.0)).otherwise(col("avg_amount_30d")))
-    )
-
-    # ── ZSCORE ────────────────────────────────────────────────────
-    # Simplified stddev = 30% of mean — known limitation, pending business calibration
-    batch_df = (
-        batch_df
-        .withColumn("amount_zscore",
-            when(col("avg_amount_30d") > 0,
-                (col("amount") - col("avg_amount_30d")) / (col("avg_amount_30d") * 0.3))
-            .otherwise(lit(0.0)))
-        .withColumn("score_zscore",
-            when(col("amount_zscore") > ZSCORE_THRESHOLD, lit(30)).otherwise(lit(0)))
-    )
-
-    # ── GEO ENRICHMENT ────────────────────────────────────────────
-    # Computes geo speed km/h using risk_profiles broadcast cache
-    batch_df = (
-        batch_df
-        .withColumn("geo_speed_kmh",
-            compute_geo_udf(
-                col("user_id"), col("merchant_lat"),
-                col("merchant_lon"), col("event_time")
-            )
-        )
-        .withColumn("score_geo",
-            when(col("geo_speed_kmh") > GEO_SPEED_THRESHOLD, lit(30)).otherwise(lit(0)))
-    )
-
-    # ── FINAL SCORE ───────────────────────────────────────────────
-    batch_df = (
-        batch_df
-        .withColumn("fraud_score",
-            col("score_velocity") + col("score_zscore") + col("score_geo"))
-        .withColumn("is_flagged", col("fraud_score") >= FRAUD_SCORE_CUTOFF)
-        .withColumn("reasons", expr("""
-            concat_ws(',',
-              case when score_velocity > 0 then 'HIGH_VELOCITY' end,
-              case when score_zscore   > 0 then 'AMOUNT_ANOMALY' end,
-              case when score_geo      > 0 then 'GEO_IMPOSSIBLE' end
-            )
-        """))
-        .persist(StorageLevel.MEMORY_AND_DISK)
-    )
+    # Persist after the streaming-plan enrichment + scoring so the 7 downstream
+    # write actions reuse the same materialized rows.
+    batch_df = batch_df.persist(StorageLevel.MEMORY_AND_DISK)
 
     # ── OBSERVABILITY — single aggregation pass ────────────────────
     stats = batch_df.agg(
@@ -441,21 +438,17 @@ def write_hot_sinks(batch_df, batch_id: int):
     flagged  = stats["flagged"] or 0
     geo_hits = stats["geo_hits"] or 0
 
-    # ── BATCH DEDUP — guard accumulators against retry double-count ─
-    # iceberg.fraud.processed_batches is source of truth for seen batch_ids
-    try:
-        already_processed = (
-            spark.read.format("iceberg").load("iceberg.fraud.processed_batches")
-            .filter(col("batch_id") == batch_id)
-            .count() > 0
-        )
-    except Exception:
-        already_processed = False  # table doesn't exist on first run
-
-    if not already_processed:
-        acc_total    += total
-        acc_flagged  += flagged
-        acc_geo_hits += geo_hits
+    # Accumulate driver-side counters. The previous code guarded this with an
+    # Iceberg read of iceberg.fraud.processed_batches — but nothing in the
+    # codebase ever WRITES to that table, so the guard always evaluated False
+    # and the read was pure waste (one S3A round-trip + JdbcCatalog cache churn
+    # every 10s). Removed in S7 alongside the JVM-cap fix. Exactly-once accuracy
+    # comes from Spark Structured Streaming's checkpoint semantics for
+    # foreachBatch, which is the correct mechanism — there is no batch_id retry
+    # under normal operation.
+    acc_total    += total
+    acc_flagged  += flagged
+    acc_geo_hits += geo_hits
 
     try:
         # ── STARROCKS — transactions ──────────────────────────────
