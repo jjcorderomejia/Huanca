@@ -238,15 +238,16 @@ def refresh_risk_if_stale():
             .rdd.map(lambda r: (r.user_id, r.asDict()))
             .collectAsMap()
         )
-        old_bc = risk_bc
         risk_bc = spark.sparkContext.broadcast(data)
-        # Explicit destroy of the old broadcast (S7): without this we relied on
-        # ContextCleaner picking up the weak reference, which lags under heap
-        # pressure. blocking=False keeps refresh latency bounded.
-        try:
-            old_bc.destroy(blocking=False)
-        except Exception:
-            pass  # already GC'd or never materialized — safe to ignore
+        # NOTE (S7): we deliberately do NOT call .destroy() on the old broadcast.
+        # An earlier attempt (commit 6180fd8) added an explicit destroy() to
+        # bound cleanup latency, but it crashed the stream with
+        # [INTERNAL_ERROR_BROADCAST] Attempted to use Broadcast(0) after it was
+        # destroyed — the JVM holds a reference to the initial broadcast object
+        # even when compute_geo_udf is invoked only inside foreachBatch (likely
+        # via a cached _judf or BroadcastManager record). Rely on ContextCleaner
+        # to reap dropped broadcasts via Python weak references. The native-
+        # memory caps in executor.extraJavaOptions bound any cleanup lag.
         _risk_cache["loaded_at"] = time.time()
     except Exception as e:
         logging.error(json.dumps({"event": "risk_refresh_failed", "error": str(e)}))
