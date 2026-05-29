@@ -42,6 +42,17 @@ spec:
     "spark.eventLog.dir": "s3a://checkpoints/spark-events"
     "spark.eventLog.rolling.enabled": "true"
     "spark.eventLog.rolling.maxFileSize": "128m"
+    # zstd compresses the JSON event stream ~8-10x. Measured raw volume was
+    # ~11-12 GiB/day (a 128m file every ~16 min), dominated by per-task TaskEnd
+    # accumulables (~149 tasks/batch over 1-3 input rows). Compression brings this
+    # to ~1.5 GiB/day with ZERO loss of recorded detail; History Server reads it natively.
+    "spark.eventLog.compress": "true"
+    "spark.eventLog.compression.codec": "zstd"
+    # Per-executor PEAK memory pools per stage (JVM on/off-heap, exec/storage,
+    # DirectPoolMemory) + ProcessTreeJVMRSSMemory — the closest the event log gets
+    # to the RSS-vs-cgroup drift behind S7. processTreeMetrics samples /proc (~1-2% CPU).
+    "spark.eventLog.logStageExecutorMetrics": "true"
+    "spark.executor.processTreeMetrics.enabled": "true"
     # Native memory caps (S7-streaming-executor-oom-sigkill.md). The default JVM
     # has NO upper bound on direct memory, metaspace, or code cache — combined
     # with -Xms=-Xmx (Spark pre-commits the full heap), the pod is structurally
@@ -49,8 +60,11 @@ spec:
     # throw a Java OOM with a stack trace naming the pool, instead of a silent
     # kernel SIGKILL with no diagnostic signal.
     # Budget: 1g direct + 512m metaspace + 256m code cache + ~500m Python workers
-    # + ~250m JVM bookkeeping ≈ 2.5g native. Pairs with memoryOverhead: "4g".
-    "spark.executor.extraJavaOptions": "-XX:MaxDirectMemorySize=1g -XX:MaxMetaspaceSize=512m -XX:ReservedCodeCacheSize=256m -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp"
+    # + ~250m JVM bookkeeping + ~300m NativeMemoryTracking ≈ 2.8g native, within
+    # the 4g memoryOverhead. NativeMemoryTracking=summary makes `jcmd 33
+    # VM.native_memory summary` return the per-pool breakdown on a LIVE executor —
+    # the one diagnostic plane the event log cannot capture (S7 was a native OOM).
+    "spark.executor.extraJavaOptions": "-XX:MaxDirectMemorySize=1g -XX:MaxMetaspaceSize=512m -XX:ReservedCodeCacheSize=256m -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp -XX:NativeMemoryTracking=summary"
 
   driver:
     cores: 1
