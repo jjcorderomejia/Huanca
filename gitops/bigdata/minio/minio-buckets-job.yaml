@@ -29,6 +29,17 @@ spec:
               mc alias set local http://minio:9000 "${MINIO_USER}" "${MINIO_PASS}"
               mc mb local/iceberg --ignore-existing
               mc mb local/checkpoints --ignore-existing
+              # Pre-create the spark-events prefix inside checkpoints. Spark
+              # eventLog (enabled in spark-fraud-stream.yaml.tpl sparkConf) does
+              # NOT auto-create its directory — driver crashes on startup with
+              # "java.io.FileNotFoundException: No such file or directory:
+              # s3a://checkpoints/spark-events" if missing. The .keep object is
+              # a sentinel so the prefix survives empty.
+              mc mb local/checkpoints/spark-events --ignore-existing
+              echo "" > /tmp/.keep && mc cp /tmp/.keep local/checkpoints/spark-events/.keep
+              # 7-day retention on event logs (compression verified ~0.9 GiB/day → ~6 GiB footprint; see huanca/ops/S7-observability-debt.md).
+              # Idempotent — listing-only output if rule already present (rule id will differ).
+              mc ilm rule add --expire-days 7 --prefix "spark-events/" local/checkpoints || true
               # Checkpoint versioning intentionally NOT enabled. Spark checkpoint churn +
               # versioning-without-noncurrent-expiration produced ~11G / ~2.4M noncurrent+
               # delete-marker objects (live checkpoint ~54MB) — see ops/S6. Recovery is
