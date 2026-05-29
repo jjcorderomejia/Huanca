@@ -8,7 +8,12 @@ spec:
   mode: cluster
   sparkVersion: "3.5.6"
   image: ghcr.io/${ORG}/fraud-spark-job:${GIT_SHA}
-  imagePullPolicy: Always
+  # IfNotPresent, not Always: the tag is a git-sha (content-immutable), so a
+  # re-pull never yields anything new. Always made every restart hard-depend on
+  # a live ghcr pull token — when ghcr-creds expired it returned 403 and the
+  # stream could not restart at all (2026-05-29 incident). The node caches the
+  # sha after first schedule; a genuinely new sha is still pulled once.
+  imagePullPolicy: IfNotPresent
   imagePullSecrets:
     - ghcr-creds
 
