@@ -1,0 +1,53 @@
+# mysql StatefulSet — captured into git at P11-4 (Longhorn migration; was raw-kubectl-applied,
+# uncommitted). storageClassName=longhorn-r2 (critical tier — holds the Hive `metastore` DB) +
+# topologySpread at recreate-time (SCALING_PATH P11-4 / §3 P10-13). Service unchanged.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  namespace: bigdata
+  labels:
+    app: mysql
+spec:
+  replicas: 1
+  serviceName: mysql
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: mysql
+      containers:
+        - name: mysql
+          image: mysql:5.7
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom: { secretKeyRef: { name: mysql-secret, key: MYSQL_ROOT_PASSWORD } }
+            - name: MYSQL_DATABASE
+              valueFrom: { secretKeyRef: { name: mysql-secret, key: MYSQL_DATABASE } }
+            - name: MYSQL_USER
+              valueFrom: { secretKeyRef: { name: mysql-secret, key: MYSQL_USER } }
+            - name: MYSQL_PASSWORD
+              valueFrom: { secretKeyRef: { name: mysql-secret, key: MYSQL_PASSWORD } }
+          ports:
+            - { containerPort: 3306, name: mysql }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/mysql }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: longhorn-r2
+        resources:
+          requests:
+            storage: 2Gi
