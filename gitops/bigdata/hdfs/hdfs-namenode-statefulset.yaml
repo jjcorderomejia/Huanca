@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  annotations: {}
+  name: hdfs-namenode
+  namespace: bigdata
+spec:
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  podManagementPolicy: OrderedReady
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: hdfs-namenode
+  serviceName: hadoop
+  template:
+    metadata:
+      labels:
+        app: hdfs-namenode
+    spec:
+      containers:
+        - image: ghcr.io/jjcorderomejia/hadoop-namenode:3.4.1
+          imagePullPolicy: IfNotPresent
+          name: namenode
+          ports:
+            - containerPort: 9870
+              name: http
+              protocol: TCP
+            - containerPort: 9000
+              name: rpc
+              protocol: TCP
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /data/hdfs/namenode
+              name: nn-data
+            - mountPath: /opt/hadoop/etc/hadoop
+              name: hadoop-conf
+      dnsPolicy: ClusterFirst
+      imagePullSecrets:
+        - name: ghcr-creds
+      initContainers:
+        - command:
+            - sh
+            - -c
+            - chown -R 1000:1000 /data/hdfs/namenode || true
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          name: fix-nn-perms
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /data/hdfs/namenode
+              name: nn-data
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - configMap:
+            defaultMode: 420
+            name: hadoop-config
+          name: hadoop-conf
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: hdfs-namenode
+  updateStrategy:
+    rollingUpdate:
+      partition: 0
+    type: RollingUpdate
+  volumeClaimTemplates:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: nn-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 5Gi
+        volumeMode: Filesystem
+        storageClassName: longhorn-r2
