@@ -73,6 +73,13 @@ spec:
       labels:
         app: starrocks-fe
     spec:
+      topologySpreadConstraints:        # P11-4 (§3 P10-13): spread when scaled; no-op at replicas=1
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: starrocks-fe
       containers:
         - name: fe
           image: starrocks/fe-ubuntu:3.2.11
@@ -100,7 +107,7 @@ spec:
         name: fe-data
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: local-path
+        storageClassName: longhorn-r2   # P11-4 Longhorn migration (was local-path)
         resources:
           requests:
             storage: 10Gi
