@@ -43,16 +43,17 @@ spec:
                 -e "SELECT 'password already set';" >/dev/null
               echo "✅ Root password secured"
 
-              # Register BE — idempotent (ADD BACKEND is safe to re-run)
-              BE_IP=$(getent hosts starrocks-be-0.starrocks-be.bigdata.svc.cluster.local \
-                | awk '{print $1}')
+              # Register BE by FQDN — idempotent (ADD BACKEND is safe to re-run).
+              # P11-4 recovery hardening (recover-starrocks-be-backend-identity.md): register the
+              # FQDN, not the resolved IP, so a re-run after a pod-IP change can't mint an IP ghost.
+              BE_FQDN="starrocks-be-0.starrocks-be.bigdata.svc.cluster.local"
 
               mysql -h starrocks-fe-svc -P 9030 -u root \
                 --password="${SR_PASSWORD}" \
-                -e "ALTER SYSTEM ADD BACKEND '${BE_IP}:9050';" \
+                -e "ALTER SYSTEM ADD BACKEND '${BE_FQDN}:9050';" \
                 2>/dev/null || echo "BE already registered"
 
-              echo "✅ BE registered: ${BE_IP}"
+              echo "✅ BE registered: ${BE_FQDN}"
 
               # Verify
               mysql -h starrocks-fe-svc -P 9030 -u root \
