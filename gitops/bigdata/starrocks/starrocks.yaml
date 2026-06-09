@@ -46,6 +46,7 @@ spec:
   selector:
     app: starrocks-be
   clusterIP: None
+  publishNotReadyAddresses: true   # P11-4 recovery: guarantee BE-0 FQDN A-record during no-op/FQDN re-key window
   ports:
     - name: heartbeat
       port: 9050
@@ -161,6 +162,10 @@ spec:
                 secretKeyRef:
                   name: starrocks-credentials
                   key: root-password
+            # P11-4 recovery (recover-starrocks-be-backend-identity.md): register BE by FQDN like the FE,
+            # so a future pod-IP change re-keys the SAME backend instead of minting a new IP ghost.
+            - name: HOST_TYPE
+              value: "FQDN"
           volumeMounts:
             - name: be-data
               mountPath: /opt/starrocks/be/storage
