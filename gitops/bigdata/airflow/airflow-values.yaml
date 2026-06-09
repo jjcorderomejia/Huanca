@@ -20,6 +20,21 @@ env:
   - name: AIRFLOW__WEBSERVER__EXPOSE_CONFIG
     value: "false"
 
+# Remote task logging to MinIO (S3-compatible). §3-2026-06-07: airflow-logs is
+# NOT migrated to Longhorn — the RWO local-path PVC pins every component + every
+# KubernetesExecutor task pod to node1 (Multi-Attach on cross-node spread). Switch
+# Airflow to remote logging to the existing `airflow` bucket in MinIO and drop the
+# PVC. KE ships task logs to S3 on COMPLETION; the running-task live-log path
+# (api-server/webserver -> task-pod worker_log_server_port 8793) is cross-node-native.
+# Amazon provider (apache-airflow-providers-amazon) ships in apache/airflow:3.1.7.
+config:
+  logging:
+    remote_logging: 'True'
+    remote_base_log_folder: 's3://airflow/logs'
+    remote_log_conn_id: 'minio_s3'
+    # path-style addressing + the in-cluster MinIO endpoint for the S3 hook
+    encrypt_s3_logs: 'False'
+
 extraEnv: |
   - name: MINIO_ACCESS_KEY
     valueFrom:
@@ -36,6 +51,13 @@ extraEnv: |
       secretKeyRef:
         name: starrocks-credentials
         key: root-password
+  # minio_s3 Airflow connection for remote_log_conn_id. Built from the
+  # secret-backed MINIO_ACCESS_KEY/SECRET_KEY above via k8s $(VAR) interpolation
+  # (those two env entries precede this one, so they are in scope) — no creds in
+  # git. aws://<login>:<password>@ + endpoint_url forces the S3 hook at the
+  # in-cluster MinIO; path-style addressing is required for MinIO.
+  - name: AIRFLOW_CONN_MINIO_S3
+    value: "aws://$(MINIO_ACCESS_KEY):$(MINIO_SECRET_KEY)@?endpoint_url=http%3A%2F%2Fminio%3A9000"
 
 serviceAccount:
   name: airflow
@@ -108,9 +130,13 @@ dags:
     depth: 1
 
 logs:
+  # §3-2026-06-07: remote logging to MinIO (config.logging above) replaces the RWO
+  # airflow-logs PVC. persistence:false drops the existingClaim mount from every
+  # component + every KubernetesExecutor task pod — unpinning Airflow from node1 so
+  # task pods schedule cross-node (hetz2/hetz3). PVC + Retain'd PV kept as fallback
+  # until the cross-node live-log-stream GUARD certifies green.
   persistence:
-    enabled: true
-    existingClaim: airflow-logs  # pre-created with ReadWriteOnce — local-path constraint
+    enabled: false
 
 postgresql:
   enabled: true
