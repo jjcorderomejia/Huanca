@@ -13,15 +13,14 @@ spec:
       # this cluster (inert). Override to kubernetes.io/hostname so the operator
       # renders a hostname-keyed constraint into the STS. ScheduleAnyway / single
       # broker → no-op at replicas=1, governs future even placement on recreate.
+      # NOTE: the redpanda operator's CRD schema for this field supports ONLY
+      # maxSkew / topologyKey / whenUnsatisfiable — NO labelSelector (the operator
+      # auto-generates the selector from the redpanda pod labels). Including a
+      # labelSelector trips structural-schema pruning and drops the whole entry.
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
           whenUnsatisfiable: ScheduleAnyway
-          labelSelector:
-            matchLabels:
-              app.kubernetes.io/instance: fraud-redpanda
-              app.kubernetes.io/name: redpanda
-              app.kubernetes.io/component: redpanda-statefulset
     storage:
       persistentVolume:
         enabled: true
