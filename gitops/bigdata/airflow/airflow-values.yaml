@@ -116,5 +116,5 @@ postgresql:
   enabled: true
   primary:
     persistence:
-      storageClass: local-path
+      storageClass: longhorn-r2
       size: 10Gi
