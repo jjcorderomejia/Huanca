@@ -8,6 +8,20 @@ spec:
   clusterSpec:
     statefulset:
       replicas: 1
+      # P11-4.5 (§3 P10-13): spread the broker off the node1 pile. The chart
+      # default TSC keys on topology.kubernetes.io/zone, which is unlabeled on
+      # this cluster (inert). Override to kubernetes.io/hostname so the operator
+      # renders a hostname-keyed constraint into the STS. ScheduleAnyway / single
+      # broker → no-op at replicas=1, governs future even placement on recreate.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: fraud-redpanda
+              app.kubernetes.io/name: redpanda
+              app.kubernetes.io/component: redpanda-statefulset
     storage:
       persistentVolume:
         enabled: true
