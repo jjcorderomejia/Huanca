@@ -118,3 +118,16 @@ postgresql:
     persistence:
       storageClass: longhorn-r2
       size: 10Gi
+    # P11-4.5 (§3 P10-13): spread the postgres primary off the node1 pile on
+    # recreate. ScheduleAnyway / single primary → brief downtime tolerated, no
+    # stuck-Pending; governs future even placement. Realized by helm upgrade
+    # (manual release) or the controlled cordon+delete rollout.
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: postgresql
+            app.kubernetes.io/instance: airflow
+            app.kubernetes.io/component: primary
