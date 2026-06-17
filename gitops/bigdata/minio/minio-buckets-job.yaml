@@ -37,9 +37,11 @@ spec:
               # a sentinel so the prefix survives empty.
               mc mb local/checkpoints/spark-events --ignore-existing
               echo "" > /tmp/.keep && mc cp /tmp/.keep local/checkpoints/spark-events/.keep
-              # 7-day retention on event logs (compression verified ~0.9 GiB/day → ~6 GiB footprint; see huanca/ops/S7-observability-debt.md).
+              # 21-day retention on event logs — raised from the 7d default during the
+              # 2026-06-17 PVC-expansion / Spark-History-Server fix incident to keep ~3wk of
+              # Spark History (safe while usage << 50Gi; revisit if spark-events/ nears ~20GiB).
               # Idempotent — listing-only output if rule already present (rule id will differ).
-              mc ilm rule add --expire-days 7 --prefix "spark-events/" local/checkpoints || true
+              mc ilm rule add --expire-days 21 --prefix "spark-events/" local/checkpoints || true
               # Checkpoint versioning intentionally NOT enabled. Spark checkpoint churn +
               # versioning-without-noncurrent-expiration produced ~11G / ~2.4M noncurrent+
               # delete-marker objects (live checkpoint ~54MB) — see ops/S6. Recovery is
