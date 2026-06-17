@@ -70,6 +70,23 @@ spec:
     # VM.native_memory summary` return the per-pool breakdown on a LIVE executor —
     # the one diagnostic plane the event log cannot capture (S7 was a native OOM).
     "spark.executor.extraJavaOptions": "-XX:MaxDirectMemorySize=1g -XX:MaxMetaspaceSize=512m -XX:ReservedCodeCacheSize=256m -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp -XX:NativeMemoryTracking=summary"
+    # --- Prometheus metrics surface (§3 INC 2026-06-17, streaming-metrics half) ---
+    # ACTIVATES ON THE NEXT STREAMER REDEPLOY — NOT applied to the live driver.
+    # The running driver does NOT serve /metrics/prometheus (the PrometheusServlet
+    # sink is unregistered: the image ships no metrics.properties). These four+one
+    # entries register the sink + the structured-streaming source WITHOUT an image
+    # rebuild; they take effect only when the driver next restarts (natural redeploy).
+    # Scraped by the bigdata PodMonitor (cluster-config manifests/spark-history/
+    # observability/podmonitor-fraud-stream.yaml) on the driver UI port 4040.
+    # spark.sql.streaming.metricsEnabled adds the structured-streaming source
+    # (input/processing rate, batch duration, state rows/bytes, watermark);
+    # spark.ui.prometheus.enabled exposes the executor prometheus endpoint;
+    # the metrics.conf.*.sink.prometheusServlet pair registers the servlet sink
+    # served at /metrics/prometheus on the driver UI port (4040).
+    "spark.sql.streaming.metricsEnabled": "true"
+    "spark.ui.prometheus.enabled": "true"
+    "spark.metrics.conf.*.sink.prometheusServlet.class": "org.apache.spark.metrics.sink.PrometheusServlet"
+    "spark.metrics.conf.*.sink.prometheusServlet.path": "/metrics/prometheus"
 
   driver:
     cores: 1
