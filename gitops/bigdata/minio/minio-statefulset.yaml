@@ -55,4 +55,6 @@ spec:
         storageClassName: longhorn-r2
         resources:
           requests:
-            storage: 5Gi
+            # 50Gi matches live PVC (expanded online 5->50Gi 2026-06-17 incident); template is
+            # documentation-intent — live PVC already 50Gi; a fresh recreate would mint 50Gi.
+            storage: 50Gi
