@@ -7,7 +7,7 @@
 
 An end-to-end fraud detection pipeline running on Kubernetes. REST endpoint accepts transactions, Spark scores them in real time against velocity, statistical, and geospatial signals, results land in StarRocks for sub-second querying, and a live dashboard shows what's happening now.
 
-**Live dashboard:** http://95.217.112.184
+Ran in production on a self-managed Kubernetes cluster on Hetzner (now decommissioned).
 
 ---
 
@@ -103,7 +103,7 @@ DAGs sync from this repo via `git-sync` — nothing baked into the Airflow image
 
 ## Dashboard
 
-Live at **http://95.217.112.184** — auto-refreshes every 5 seconds.
+A React dashboard that auto-refreshes every 5 seconds.
 
 Shows real-time metrics over the last hour: total transactions, flagged count, average fraud score, flag rate, a bar chart of recent fraud scores, top risky users over 24h, and a table of the most recent fraud alerts with score breakdown and reasons.
 
