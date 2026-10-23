@@ -21,3 +21,8 @@ k8s-bigdata/spark-fraud-job/compact_iceberg.py
 k8s-bigdata/spark-fraud-job/customer_csv_to_iceberg.py
 k8s-bigdata/spark-fraud-job/fraud_stream_to_starrocks.py
 docs/
+
+# Local dev / test tooling
+.venv/
+.pytest_cache/
+.ruff_cache/

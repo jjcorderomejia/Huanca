@@ -1,0 +1,5 @@
+# DAG integrity tests. Matches the cluster's apache/airflow:3.1.7 image; install
+# with the official constraints file (see .github/workflows/ci.yml).
+apache-airflow==3.1.7
+apache-airflow-providers-cncf-kubernetes
+pytest
