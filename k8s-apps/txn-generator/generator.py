@@ -18,12 +18,10 @@ Design decisions:
 
 import os
 import time
-import uuid
 import random
 import math
 import logging
 import requests
-from datetime import datetime
 
 logging.basicConfig(
     level=logging.INFO,
