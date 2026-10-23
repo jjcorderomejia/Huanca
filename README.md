@@ -1,5 +1,7 @@
 # Huanca — Real-Time Payment Fraud Detection
 
+[![CI](https://github.com/jjcorderomejia/Huanca/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jjcorderomejia/Huanca/actions/workflows/ci.yml)
+
 **Juan Cordero** — Data / Platform Engineer
 [LinkedIn](https://www.linkedin.com/in/juan-cordero-034989112/) · [GitHub](https://github.com/jjcorderomejia) · jjcorderomejia@gmail.com
 
@@ -128,6 +130,20 @@ GET  /api/top-risky-users     highest-flag-count users over 24h
 Terraform runs inside a K8s Job — not from a laptop. It manages RBAC and ServiceAccounts only; namespaces are pre-existing. State lives in MinIO at `s3a://tf-state/fraud-lab/terraform.tfstate`. No credentials in `.tfvars`, no credentials in git.
 
 ArgoCD manages everything under `gitops/bigdata/` — Redpanda, StarRocks, MinIO, Airflow. The SparkApplication is applied imperatively because it depends on a runtime secret (Iceberg DB password from the Airflow PostgreSQL secret) that isn't available at ArgoCD sync time.
+
+---
+
+## Testing
+
+`tests/` covers the FastAPI backend (Kafka/StarRocks mocked), the transaction generator, the Spark scoring rules on a local SparkSession, cross-component schema contracts, and Airflow DAG integrity. CI runs it on every push and PR.
+
+```bash
+python3.11 -m venv .venv && . .venv/bin/activate
+pip install -r requirements-dev.txt   # needs Java 8/11/17 for the Spark tests
+ruff check . && pytest -q
+```
+
+DAG tests need Airflow: `pip install -r requirements-airflow.txt -c https://raw.githubusercontent.com/apache/airflow/constraints-3.1.7/constraints-3.11.txt`.
 
 ---
 

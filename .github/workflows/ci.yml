@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Lint + unit tests (backend, generator, Spark scoring)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            k8s-apps/backend-api/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Ruff
+        run: ruff check .
+
+      - name: Pytest
+        env:
+          PYSPARK_PYTHON: python
+        run: pytest -q
+
+  dags:
+    name: Airflow DAG integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-airflow.txt
+
+      - name: Install Airflow (constrained)
+        run: >
+          pip install -r requirements-airflow.txt
+          -c https://raw.githubusercontent.com/apache/airflow/constraints-3.1.7/constraints-3.11.txt
+
+      - name: DagBag tests
+        run: pytest -q tests/dags
